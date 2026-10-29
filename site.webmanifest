@@ -1,0 +1,14 @@
+{
+  "name": "TrailSafe",
+  "short_name": "TrailSafe",
+  "description": "TrailSafe is a community trail safety tool.",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#FBF8F1",
+  "theme_color": "#1E3A2C",
+  "icons": [
+    { "src": "/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/maskable-icon-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
