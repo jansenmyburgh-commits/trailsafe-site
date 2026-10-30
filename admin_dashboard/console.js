@@ -79,7 +79,7 @@ async function showAuthenticatorStep() {
     }
     return
   }
-  for (const x of f?.totp ?? []) await sb.auth.mfa.unenroll({ factorId: x.id })        // an unfinished set-up from before
+  for (const x of f?.all ?? []) if (x.factor_type === 'totp' && x.status !== 'verified') await sb.auth.mfa.unenroll({ factorId: x.id })   // an unfinished set-up from before
   const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'TrailSafe owner' })
   if (error) return showEmailStep(error.message)
   loginShell(`<p><b>One-time set-up.</b> Scan this with an authenticator app (Google Authenticator, Authy, 1Password…), then enter the 6-digit code it shows.</p>
