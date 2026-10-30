@@ -114,8 +114,8 @@ function shell(active, inner) {
   const badge = (k) => (k === 'requests' && counts.requests ? `<span class="count">${counts.requests}</span>` : k === 'feedback' && counts.feedback ? `<span class="count">${counts.feedback}</span>` : '')
   $('#app').innerHTML = `<div class="layout"><nav><div class="brand">TrailSafe</div><div class="sub">Owner console</div>
     ${NAV.map(([k, l]) => `<a href="#/${k}" class="${k === active ? 'on' : ''}">${l}${badge(k)}</a>`).join('')}
-    <div class="who">${esc(me)}<br><button id="out">Sign out</button></div></nav><main>${inner}</main></div>`
-  $('#out').onclick = async () => { await sb.auth.signOut(); showEmailStep() }
+    <div class="who">${esc(me)}<br><button id="signout">Sign out</button></div></nav><main>${inner}</main></div>`
+  $('#signout').onclick = async () => { await sb.auth.signOut(); showEmailStep() }
 }
 async function guard(fn) { try { await fn() } catch (e) { if (['sign_in', 'two_step'].includes(e.message)) return start(); toast(say(e)) } }
 
