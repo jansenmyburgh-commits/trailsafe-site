@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delete your account | TrailSafe</title>
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<style>
+  .steps { list-style: none; padding: 0; margin: 22px 0 0; }
+  .steps > li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; margin: 0 0 22px; padding: 0; }
+  .num { width: 30px; height: 30px; border-radius: 50%; background: var(--sage); color: var(--forest); font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .steps li.off { opacity: .45; pointer-events: none; }
+  label { display: block; font-size: .8rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--moss-ink); }
+  input { width: 100%; max-width: 380px; min-height: 48px; margin-top: 4px; padding: 0 14px; border: 1.5px solid var(--line); border-radius: 12px; font: inherit; background: #fff; }
+  button { min-height: 48px; margin-top: 12px; padding: 0 22px; border-radius: 12px; border: 0; background: var(--forest); color: var(--cream); font: inherit; font-weight: 700; cursor: pointer; }
+  button.danger { background: #9A4C2E; color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .err { color: #9A4C2E; font-weight: 600; margin-top: 10px; min-height: 1.3em; }
+  .done { text-align: center; padding: 30px 0; }
+  .done b { display: block; font-family: "Young Serif", Georgia, serif; font-weight: 400; font-size: 1.6rem; color: var(--forest); margin-top: 8px; }
+  .small { font-size: .95rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="page">
+<a class="back" href="/">‹ TrailSafe</a>
+<h1>Delete your TrailSafe account.</h1>
+<p>This deletes your profile, your place in your community and your consent records. If one of your alerts is live, it ends now. Your name is removed from any alert log entries. We keep an anonymous record of approvals for 24 months, with no name on it.</p>
+
+<div id="flow">
+<ol class="steps">
+  <li id="s1"><span class="num">1</span><div>
+    <b>Sign in with your email.</b>
+    <p class="small">We send you an email verification code. Enter it in the next step.</p>
+    <label for="em">Email</label><input id="em" type="email" autocomplete="email" inputmode="email">
+    <div><button id="send">Send code</button></div>
+  </div></li>
+  <li id="s2" class="off"><span class="num">2</span><div>
+    <b>Enter the email verification code.</b>
+    <label for="cd" style="margin-top:8px">6-digit code</label><input id="cd" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+    <div><button id="verify">Continue</button></div>
+  </div></li>
+  <li id="s3" class="off"><span class="num">3</span><div>
+    <b>Confirm. This can’t be undone.</b>
+    <div><button id="del" class="danger" disabled>Delete my account</button></div>
+  </div></li>
+</ol>
+<div class="err" id="e" role="alert"></div>
+</div>
+
+<div id="deleted" class="done" hidden><div style="font-size:2rem">✓</div><b>Your account has been deleted.</b><p class="small">Thank you for using TrailSafe.</p></div>
+
+<p class="small" style="margin-top:30px">You can also do this in the app: Profile → Delete my account. Questions: <a href="mailto:hello@trailsafety.app">hello@trailsafety.app</a> · <a href="/privacy.html">Privacy Policy</a></p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+const SUPABASE_URL = 'https://qpezqayqbghujlwjgemu.supabase.co'
+const SUPABASE_KEY = 'sb_publishable_sbcMyfC8UcLTJ0g-i2vduw_RGy7CiEp'      // public by design
+const TURNSTILE_SITE_KEY = '0x4AAAAAAFvFaEQHEPuX1Iu7'                      // public by design
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false, autoRefreshToken: false } })
+const $ = (s) => document.querySelector(s)
+const say = (m) => { $('#e').textContent = m || '' }
+const unlock = (n) => { for (const i of [1, 2, 3]) $('#s' + i).classList.toggle('off', i !== n); $('#del').disabled = n !== 3 }
+let email = ''
+
+// The bot check Supabase asks for when a code is requested (Cloudflare Turnstile): invisible, or a small tick box if Cloudflare is unsure.
+let load = null
+function captchaToken() {
+  load = load || new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; s.onload = ok; s.onerror = no; document.head.appendChild(s) })
+  return load.then(() => new Promise((ok, no) => {
+    const box = document.createElement('div'); box.style.cssText = 'position:fixed;left:0;right:0;bottom:24px;display:flex;justify-content:center;z-index:60'; document.body.appendChild(box)
+    let id; const gone = () => { try { window.turnstile.remove(id) } catch {} box.remove() }
+    id = window.turnstile.render(box, { sitekey: TURNSTILE_SITE_KEY, appearance: 'interaction-only', retry: 'auto', callback: (t) => { gone(); ok(t) } })
+    setTimeout(() => { gone(); no(new Error('captcha')) }, 120000)
+  }))
+}
+
+$('#send').onclick = async () => {
+  email = $('#em').value.trim().toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return say('Please type your email address.')
+  say(''); $('#send').disabled = true
+  let token
+  try { token = await captchaToken() } catch { $('#send').disabled = false; return say('We couldn’t confirm you’re a person. If you’re using a VPN, switch it off for a moment and try again.') }
+  // No account is ever created from this page; an unknown address gets the same words as a known one.
+  await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false, captchaToken: token } })
+  $('#send').disabled = false
+  say('If that email belongs to a TrailSafe account, we’ve sent a 6-digit email verification code.')
+  unlock(2); $('#cd').focus()
+}
+$('#verify').onclick = async () => {
+  const { error } = await sb.auth.verifyOtp({ email, token: $('#cd').value.trim(), type: 'email' })
+  if (error) return say('That email verification code didn’t match or has expired. Try again, or send a new code.')
+  say(''); unlock(3)
+}
+$('#del').onclick = async () => {
+  $('#del').disabled = true
+  const { error } = await sb.rpc('delete_my_account')
+  if (error) { $('#del').disabled = false; return say('We couldn’t delete your account just now. Try again, or write to hello@trailsafety.app.') }
+  await sb.auth.signOut({ scope: 'local' })
+  $('#flow').hidden = true; $('#deleted').hidden = false
+}
+unlock(1)
+</script>
+</body>
+</html>
