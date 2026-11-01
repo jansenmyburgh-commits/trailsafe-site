@@ -4,6 +4,7 @@ const SUPABASE_URL = 'https://qpezqayqbghujlwjgemu.supabase.co'
 const SUPABASE_KEY = 'sb_publishable_sbcMyfC8UcLTJ0g-i2vduw_RGy7CiEp'
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, storageKey: 'trailsafe-owner' } })
 
+const TURNSTILE_SITE_KEY = '0x4AAAAAAFvFaEQHEPuX1Iu7'   // public by design
 const $ = (s) => document.querySelector(s)
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const when = (iso) => { if (!iso) return ''; const d = new Date(iso); return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) }
@@ -39,6 +40,19 @@ function confirmBox({ title, text, verb, danger = false }) {
   })
 }
 
+
+// ---------- the bot check (Cloudflare Turnstile): Supabase now asks for it when an email code is requested ----------
+let captchaLoad = null
+function captchaToken() {
+  captchaLoad = captchaLoad || new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; s.onload = ok; s.onerror = no; document.head.appendChild(s) })
+  return captchaLoad.then(() => new Promise((ok, no) => {
+    const box = document.createElement('div'); box.style.cssText = 'position:fixed;left:0;right:0;bottom:24px;display:flex;justify-content:center;z-index:60'; document.body.appendChild(box)
+    let id; const gone = () => { try { window.turnstile.remove(id) } catch {} box.remove() }
+    id = window.turnstile.render(box, { sitekey: TURNSTILE_SITE_KEY, appearance: 'interaction-only', retry: 'auto', callback: (t) => { gone(); ok(t) } })
+    setTimeout(() => { gone(); no(new Error('captcha')) }, 120000)
+  }))
+}
+
 // ---------- sign in: email code, then authenticator code ----------
 function loginShell(inner) {
   $('#app').innerHTML = `<div class="login"><h1>TrailSafe owner console</h1><div class="panel">${inner}</div></div>`
@@ -50,7 +64,8 @@ function showEmailStep(msg = '') {
     const email = $('#em').value.trim().toLowerCase()
     if (!email) return
     $('#send').disabled = true
-    const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } })
+    let captchaToken_; try { captchaToken_ = await captchaToken() } catch { $('#e').textContent = 'The bot check did not pass. If you use a VPN, switch it off for a moment and try again.'; $('#send').disabled = false; return }
+    const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, captchaToken: captchaToken_ } })
     if (error) { $('#e').textContent = error.message; $('#send').disabled = false; return }
     showCodeStep(email)
   }
@@ -109,7 +124,7 @@ async function refreshCounts() {
     counts = { requests: r.data.filter((x) => x.status === 'new').length, feedback: f.data.filter((x) => x.status === 'new').length }
   } catch { /* the counts are a nicety */ }
 }
-const NAV = [['communities', 'Communities'], ['people', 'People'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['audit', 'Audit trail']]
+const NAV = [['communities', 'Communities'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['audit', 'Audit trail']]
 function shell(active, inner) {
   const badge = (k) => (k === 'requests' && counts.requests ? `<span class="count">${counts.requests}</span>` : k === 'feedback' && counts.feedback ? `<span class="count">${counts.feedback}</span>` : '')
   $('#app').innerHTML = `<div class="layout"><nav><div class="brand">TrailSafe</div><div class="sub">Owner console</div>
@@ -134,8 +149,76 @@ function route() {
     if (p === 'request') return viewRequest(a)
     if (p === 'feedback') return viewFeedback(q.get('f') || 'all')
     if (p === 'report') return viewReport(a)
+    if (p === 'alerts') return viewAlerts()
+    if (p === 'health') return viewHealth()
     if (p === 'audit') return viewAudit()
     return viewCommunities()
+  })
+}
+
+
+// ---- I: health and numbers (counts only; no locations, ever) ----
+const dur = (s) => (s == null ? '—' : s < 90 ? `${s} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`)
+async function viewHealth() {
+  const [{ data: h }, { data: pilot }] = await Promise.all([api('ops_status'), api('pilot')])
+  const stuck = h.outbox_pending > 0 && (h.outbox_oldest_age_s ?? 0) > 300
+  const tile = (ok, big, label, line) => `<div class="tile ${ok === null ? '' : ok ? 'ok' : 'bad'}"><div class="big">${esc(big)}</div><div class="lab">${esc(label)}</div><div class="line">${esc(line)}</div></div>`
+  const at = new Date(h.time).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  shell('health', `<h1>Health and numbers</h1><p class="hint">Counts only. Checked ${esc(at)}. <a href="#/health">Check again</a></p>
+    <h2>Is it working?</h2><div class="tiles">
+    ${tile(!stuck, h.outbox_pending, 'Notifications waiting', stuck ? 'Notifications are waiting longer than 5 minutes. Look now.' : 'Nothing is stuck.')}
+    ${tile(!stuck, h.outbox_pending ? dur(h.outbox_oldest_age_s) : '—', 'Oldest waiting', h.outbox_pending ? (stuck ? 'Waiting too long.' : 'Waiting a short while.') : 'Nothing waiting.')}
+    ${tile(h.outbox_gave_up === 0, h.outbox_gave_up, 'Gave up', h.outbox_gave_up ? 'A notification failed for good. Look now.' : 'No notification failed for good.')}
+    ${tile(h.alerts_overdue === 0, h.alerts_overdue, 'Alerts overdue', h.alerts_overdue ? 'An alert is still live after it should have expired. Look now.' : 'No alert is overdue.')}
+    ${tile(null, h.out_now, 'Out right now', 'Members sharing or hiding.')}
+    ${tile(true, 'OK', 'Last health check', at)}</div>
+    <h2>The pilot so far</h2><div class="tiles three">
+    ${tile(null, pilot.signups, 'Sign-ups', 'People who have an account.')}
+    ${tile(null, pilot.approvals, 'Approvals', 'People now in a community.')}
+    ${tile(null, pilot.median_approval_s == null ? '—' : dur(pilot.median_approval_s), 'Median time to approve', 'From asking to being approved.')}</div>
+    <p class="hint">Green means fine; red means look now, with one line saying why. No locations, ever.</p>`)
+}
+
+// ---- J / K: the alert log across every community (last 7 days) ----
+const dayTime = (iso) => { if (!iso) return ''; const d = new Date(iso); const t = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); const today = new Date().toDateString() === d.toDateString()
+  return (today ? 'Today ' : d.toLocaleDateString('en-GB', { weekday: 'short' }) + ' ') + t }
+async function viewAlerts() {
+  const { data } = await api('alert_log')
+  shell('alerts', `<h1>Alert log</h1><p class="hint">Every community, last 7 days. Use Hide only for a false or malicious alert.</p>
+    <table><tr><th>Community</th><th>Sender</th><th>Sent</th><th>Ended</th><th>Started at</th><th></th></tr>
+    ${data.map((a) => `<tr><td>${esc(a.community || '')}</td><td>${esc(a.sender_name || 'A former member')}</td><td>${esc(dayTime(a.started_at))}</td>
+      <td>${a.end_kind === 'expired' ? 'Expired ' : ''}${esc(a.ended_at ? new Date(a.ended_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '')}</td>
+      <td>${a.lat == null ? '' : `${a.lat.toFixed(4)}, ${a.lng.toFixed(4)}`}</td>
+      <td>${a.hidden ? `<span class="muted" title="${esc(a.hidden_reason || '')}">Hidden</span>` : `<button class="btn small warn" data-hide="${a.alert_id}" data-who="${esc(a.sender_name || 'A former member')}" data-c="${esc(a.community || '')}" data-t="${esc(dayTime(a.started_at))}">Hide entry</button>`}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No alerts in the last 7 days.</td></tr>'}</table>
+    <p class="hint">The one place a coordinate appears: the same one every member can already read in the app. A hidden entry vanishes from members’ logs and stays here for the audit.</p>`)
+  document.querySelectorAll('[data-hide]').forEach((b) => (b.onclick = () => guard(async () => {
+    const reason = await reasonBox({ title: `Hide ${b.dataset.who}’s alert from ${b.dataset.c}?`, text: `${b.dataset.t}. It disappears from members’ logs and stays here, marked Hidden.`, verb: 'Hide entry' })
+    if (!reason) return
+    await api('hide_alert', { alert: b.dataset.hide, reason }); toast('Hidden.'); viewAlerts()
+  })))
+}
+// a confirm box that also asks for the reason (wf-14 K: a reason is required)
+function reasonBox({ title, text, verb }) {
+  return new Promise((ok) => {
+    const m = $('#modal')
+    m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><p>${esc(text)}</p><label for="why">Why? (required)</label><input id="why" type="text" maxlength="500" autofocus>
+      <p class="muted">This is recorded in the audit trail.</p><div class="row"><button class="btn warn" id="yes" disabled>${esc(verb)}</button><button class="btn" id="no">Cancel</button></div></div>`
+    m.hidden = false
+    const done = (v) => { m.hidden = true; m.innerHTML = ''; ok(v) }
+    $('#why').oninput = () => { $('#yes').disabled = !$('#why').value.trim() }
+    $('#yes').onclick = () => done($('#why').value.trim()); $('#no').onclick = () => done(null)
+  })
+}
+
+// a confirm box with a choice of communities
+function pickBox({ title, text, options, verb }) {
+  return new Promise((ok) => {
+    const m = $('#modal')
+    m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><p>${esc(text)}</p><label for="to">Move to</label><select id="to">${options.map(([v, n]) => `<option value="${v}">${esc(n)}</option>`).join('')}</select>
+      <p class="muted">This is recorded in the audit trail.</p><div class="row"><button class="btn go" id="yes">${esc(verb)}</button><button class="btn" id="no">Cancel</button></div></div>`
+    m.hidden = false
+    const done = (v) => { m.hidden = true; m.innerHTML = ''; ok(v) }
+    $('#yes').onclick = () => { const sel = $('#to'); done({ id: sel.value, name: sel.options[sel.selectedIndex].text }) }; $('#no').onclick = () => done(null)
   })
 }
 
@@ -161,6 +244,7 @@ async function viewCommunity(id) {
     <table><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr>
     ${members.map((m) => `<tr><td><b>${esc(m.full_name)}</b></td><td>${esc(m.email)}</td><td>${m.role === 'admin' ? 'Admin' : 'Member'}</td>
       <td class="row"><button class="btn small" data-role="${m.role === 'admin' ? 'member' : 'admin'}" data-u="${m.user_id}" data-n="${esc(m.full_name)}">${m.role === 'admin' ? 'Remove admin rights' : 'Make admin'}</button>
+      <button class="btn small" data-mv="${m.user_id}" data-n="${esc(m.full_name)}">Move to…</button>
       <button class="btn small warn" data-rm="${m.user_id}" data-n="${esc(m.full_name)}">Remove</button></td></tr>`).join('')}</table>
     <p class="hint">Names and activity only — never a location.</p>`)
   document.querySelectorAll('[data-role]').forEach((b) => (b.onclick = () => guard(async () => {
@@ -168,6 +252,15 @@ async function viewCommunity(id) {
     if (!(await confirmBox(admin ? { title: `Make ${b.dataset.n} an admin of ${info.name}?`, text: 'They’ll be able to approve and remove members.', verb: 'Make admin' }
       : { title: `Remove admin rights from ${b.dataset.n}?`, text: 'They stay a member.', verb: 'Remove admin rights' }))) return
     await api('set_role', { community: id, user: b.dataset.u, role: b.dataset.role }); toast('Done.'); viewCommunity(id)
+  })))
+  document.querySelectorAll('[data-mv]').forEach((b) => (b.onclick = () => guard(async () => {
+    const { data: all } = await api('communities')
+    const others = all.filter((x) => x.community_id !== id && x.is_active !== false)
+    if (!others.length) return toast('There is no other community to move to.')
+    const to = await pickBox({ title: `Move ${b.dataset.n} from ${info.name} to…`, options: others.map((x) => [x.community_id, x.name]),
+      text: 'They leave this community and join the other one straight away. A live alert of theirs ends, and they press Start again.', verb: 'Move' })
+    if (!to) return
+    await api('move_member', { user: b.dataset.mv, from: id, to: to.id }); toast(`${b.dataset.n} is now in ${to.name}.`); viewCommunity(id)
   })))
   document.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = () => guard(async () => {
     if (!(await confirmBox({ title: `Remove ${b.dataset.n} from ${info.name}?`, text: 'They lose access straight away and can ask to join again.', verb: 'Remove from community', danger: true }))) return

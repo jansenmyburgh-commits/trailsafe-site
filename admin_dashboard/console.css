@@ -52,3 +52,12 @@ input[type=text], input[type=email], input[type=search], select, textarea { widt
 .qr { background:#fff; border:1.5px solid var(--line); border-radius:12px; padding:10px; display:inline-block; }
 .qr img { display:block; width:180px; height:180px; }
 @media (max-width: 760px) { .layout { flex-direction:column; } nav { width:auto; flex-direction:row; flex-wrap:wrap; } nav .who { margin:0 0 0 auto; } main { padding:20px 16px; } table { display:block; overflow-x:auto; } }
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin:10px 0 22px}
+.tiles.three{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+.tile{background:#fff;border:1.5px solid var(--line,#d9d6c8);border-radius:14px;padding:14px 16px}
+.tile .big{font-family:var(--serif,Georgia,serif);font-size:30px;line-height:1.1}
+.tile .lab{font-weight:700;margin-top:4px}
+.tile .line{color:#5a5f55;font-size:13px;margin-top:4px}
+.tile.ok{border-color:#6b8f5e}.tile.ok .big::before{content:'';display:inline-block;width:10px;height:10px;border-radius:50%;background:#6b8f5e;margin-right:8px;vertical-align:middle}
+.tile.bad{border-color:#9a4c2e;background:#fbf1ec}.tile.bad .big{color:#9a4c2e}.tile.bad .big::before{content:'';display:inline-block;width:10px;height:10px;border-radius:50%;background:#9a4c2e;margin-right:8px;vertical-align:middle}
