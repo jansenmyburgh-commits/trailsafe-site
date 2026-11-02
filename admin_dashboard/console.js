@@ -43,12 +43,19 @@ function confirmBox({ title, text, verb, danger = false }) {
 
 // ---------- the bot check (Cloudflare Turnstile): Supabase now asks for it when an email code is requested ----------
 let captchaLoad = null
+// The box appears right under the sign-in button (a slot with room), never off in a corner (owner, 2 Nov 2026).
 function captchaToken() {
   captchaLoad = captchaLoad || new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; s.onload = ok; s.onerror = no; document.head.appendChild(s) })
   return captchaLoad.then(() => new Promise((ok, no) => {
-    const box = document.createElement('div'); box.style.cssText = 'position:fixed;left:0;right:0;bottom:24px;display:flex;justify-content:center;z-index:60'; document.body.appendChild(box)
-    let id; const gone = () => { try { window.turnstile.remove(id) } catch {} box.remove() }
-    id = window.turnstile.render(box, { sitekey: TURNSTILE_SITE_KEY, appearance: 'interaction-only', retry: 'auto', callback: (t) => { gone(); ok(t) } })
+    const slot = document.querySelector('#cap')
+    const box = slot ? slot.querySelector('[data-widget]') : document.body.appendChild(Object.assign(document.createElement('div'), { style: 'position:fixed;left:0;right:0;bottom:24px;display:flex;justify-content:center;z-index:60' }))
+    const hint = slot ? slot.querySelector('[data-hint]') : null
+    box.style.minHeight = '65px'
+    if (hint) { hint.hidden = false; hint.textContent = 'Checking that you’re a person…' }
+    let id; const gone = () => { try { window.turnstile.remove(id) } catch {} box.style.minHeight = ''; if (hint) hint.hidden = true; if (!slot) box.remove() }
+    id = window.turnstile.render(box, { sitekey: TURNSTILE_SITE_KEY, appearance: 'interaction-only', retry: 'auto',
+      'before-interactive-callback': () => { if (hint) { hint.hidden = false; hint.textContent = 'Please tick the box to continue.' } if (slot) slot.scrollIntoView({ block: 'center', behavior: 'smooth' }) },
+      callback: (t) => { gone(); ok(t) } })
     setTimeout(() => { gone(); no(new Error('captcha')) }, 120000)
   }))
 }
@@ -59,7 +66,7 @@ function loginShell(inner) {
 }
 function showEmailStep(msg = '') {
   loginShell(`<p>Sign in with the owner email. We send a 6-digit code to it.</p><label for="em">Email</label><input id="em" type="email" autocomplete="username" autofocus>
-    <div class="row" style="margin-top:14px"><button class="btn go" id="send">Send code</button></div><div class="err" id="e">${esc(msg)}</div>`)
+    <div class="row" style="margin-top:14px"><button class="btn go" id="send">Send code</button></div><div id="cap" style="margin-top:10px;text-align:center"><p data-hint hidden style="font-weight:600"></p><div data-widget style="display:flex;justify-content:center"></div></div><div class="err" id="e">${esc(msg)}</div>`)
   $('#send').onclick = async () => {
     const email = $('#em').value.trim().toLowerCase()
     if (!email) return
