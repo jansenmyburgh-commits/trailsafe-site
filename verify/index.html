@@ -4,47 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>TrailSafe check</title>
-<style>
-  html,body{margin:0;background:#faf7f0;color:#1d3a2c;font-family:-apple-system,system-ui,sans-serif}
-  body{display:flex;flex-direction:column;align-items:center;padding:48px 24px;text-align:center}
-  h1{font-family:Georgia,serif;font-size:32px;margin:0 0 12px}
-  p{margin:0 0 20px;font-size:17px;line-height:1.4}
-  a{display:inline-block;margin-top:12px;padding:14px 28px;border-radius:12px;background:#1d3a2c;color:#faf7f0;text-decoration:none;font-weight:600}
-</style>
+<title>Checking</title>
+<style>html,body{margin:0;background:transparent}body{display:flex;justify-content:center}</style>
 </head>
 <body>
-<h1>TrailSafe</h1>
-<p id="say">Checking that you’re a person…</p>
 <div id="w"></div>
-<a id="back" href="#" hidden>Back to TrailSafe</a>
 <script>
-// The bot check (Cloudflare Turnstile) for the TrailSafe app on iPhone and iPad. The app's own browser has a non-web address that Cloudflare
-// distrusts (error 600010), so the app opens this page in the phone's own browser sheet. When the check passes, the page hands the one-use
-// token back to the app through the app's own address (za.co.trailsafe.app://) and the sheet closes. Nothing is stored or sent except to Cloudflare.
-const say = document.getElementById('say')
-const back = document.getElementById('back')
-function done(token) {
-  const url = 'za.co.trailsafe.app://verified?token=' + encodeURIComponent(token)
-  say.textContent = 'Done. Going back to TrailSafe…'
-  back.href = url
-  back.hidden = false
-  location.href = url
-}
+// The bot check for the TrailSafe app on iPhone and iPad (Cloudflare Turnstile). The app's own browser has a non-web address that Cloudflare
+// distrusts (error 600010), so the check runs here, on a normal web address, shown inside the app, and the result is passed back.
+// Nothing is stored or sent anywhere except to Cloudflare; the token is single-use and goes to the app, which hands it to the sign-in request.
+const SRC = 'trailsafe-turnstile'
+// Only the app itself (never another site that embeds this page) receives the result; the browser delivers to the matching origin only.
+const tell = (m) => ['capacitor://localhost', 'https://localhost'].forEach((o) => parent.postMessage({ source: SRC, ...m }, o))
 function start() {
   if (!window.turnstile) return setTimeout(start, 100)
   window.turnstile.render('#w', {
     sitekey: '0x4AAAAAAFvFaEQHEPuX1Iu7',          // public by design
     appearance: 'interaction-only', retry: 'auto', 'retry-interval': 3000,
-    'before-interactive-callback': () => { say.textContent = 'Please tick the box to continue.' },
-    'error-callback': (c) => { say.textContent = 'The check had a problem (code ' + c + '). Trying again…'; return true },
-    callback: done,
+    'before-interactive-callback': () => tell({ type: 'interactive' }),
+    'error-callback': (c) => { tell({ type: 'error', code: String(c) }); return true },
+    callback: (token) => tell({ type: 'token', token }),
   })
 }
 const s = document.createElement('script')
 s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
 s.onload = start
-s.onerror = () => { say.textContent = 'Could not load the check. Close this and try again.' }
+s.onerror = () => tell({ type: 'error', code: 'script' })
 document.head.appendChild(s)
 </script>
 </body>
