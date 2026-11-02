@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Checking</title>
+<style>html,body{margin:0;background:transparent}body{display:flex;justify-content:center}</style>
+</head>
+<body>
+<div id="w"></div>
+<script>
+// The bot check for the TrailSafe app on iPhone and iPad (Cloudflare Turnstile). The app's own browser has a non-web address that Cloudflare
+// distrusts (error 600010), so the check runs here, on a normal web address, shown inside the app, and the result is passed back.
+// Nothing is stored or sent anywhere except to Cloudflare; the token is single-use and goes to the app, which hands it to the sign-in request.
+const SRC = 'trailsafe-turnstile'
+const tell = (m) => parent.postMessage({ source: SRC, ...m }, '*')
+function start() {
+  if (!window.turnstile) return setTimeout(start, 100)
+  window.turnstile.render('#w', {
+    sitekey: '0x4AAAAAAFvFaEQHEPuX1Iu7',          // public by design
+    appearance: 'interaction-only', retry: 'auto', 'retry-interval': 3000,
+    'before-interactive-callback': () => tell({ type: 'interactive' }),
+    'error-callback': (c) => { tell({ type: 'error', code: String(c) }); return true },
+    callback: (token) => tell({ type: 'token', token }),
+  })
+}
+const s = document.createElement('script')
+s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+s.onload = start
+s.onerror = () => tell({ type: 'error', code: 'script' })
+document.head.appendChild(s)
+</script>
+</body>
+</html>
