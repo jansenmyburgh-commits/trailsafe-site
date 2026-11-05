@@ -61,3 +61,14 @@ input[type=text], input[type=email], input[type=search], select, textarea { widt
 .tile .line{color:#5a5f55;font-size:13px;margin-top:4px}
 .tile.ok{border-color:#6b8f5e}.tile.ok .big::before{content:'';display:inline-block;width:10px;height:10px;border-radius:50%;background:#6b8f5e;margin-right:8px;vertical-align:middle}
 .tile.bad{border-color:#9a4c2e;background:#fbf1ec}.tile.bad .big{color:#9a4c2e}.tile.bad .big::before{content:'';display:inline-block;width:10px;height:10px;border-radius:50%;background:#9a4c2e;margin-right:8px;vertical-align:middle}
+
+/* wf-22: trail areas */
+.ta{display:grid;grid-template-columns:260px 1fr;gap:16px;margin-top:14px;align-items:start}
+#tamap{height:560px;border:1.5px solid var(--line);border-radius:12px;overflow:hidden;background:var(--wash)}
+#taside h2{margin-top:0;font-size:18px}
+.arow{border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:8px 10px;margin-top:8px}
+.arow b{display:block}.arow small{display:block;color:var(--muted);margin:2px 0 6px}
+.okmsg{margin-top:10px;background:var(--wash);color:var(--forest);font-weight:700;border-radius:10px;padding:8px 12px;max-width:640px}
+.badmsg{background:var(--clay-soft);color:var(--clay);font-weight:700;border-radius:10px;padding:8px 12px}
+.col{display:flex;flex-direction:column;gap:8px}
+@media (max-width:760px){.ta{grid-template-columns:1fr}#tamap{height:420px}}

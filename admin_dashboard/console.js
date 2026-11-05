@@ -131,7 +131,7 @@ async function refreshCounts() {
     counts = { requests: r.data.filter((x) => x.status === 'new').length, feedback: f.data.filter((x) => x.status === 'new').length }
   } catch { /* the counts are a nicety */ }
 }
-const NAV = [['communities', 'Communities'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['audit', 'Audit trail']]
+const NAV = [['communities', 'Communities'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas']]
 function shell(active, inner) {
   const badge = (k) => (k === 'requests' && counts.requests ? `<span class="count">${counts.requests}</span>` : k === 'feedback' && counts.feedback ? `<span class="count">${counts.feedback}</span>` : '')
   $('#app').innerHTML = `<div class="layout"><nav><div class="brand">TrailSafe</div><div class="sub">Owner console</div>
@@ -159,6 +159,7 @@ function route() {
     if (p === 'alerts') return viewAlerts()
     if (p === 'health') return viewHealth()
     if (p === 'audit') return viewAudit()
+    if (p === 'trail-areas') return viewTrailAreas(a)
     return viewCommunities()
   })
 }
@@ -416,6 +417,133 @@ async function viewAudit() {
   const { data } = await api('audit_trail')
   shell('audit', `<h1>Audit trail</h1><p class="hint">Kept 24 months. Newest first.</p><table><tr><th>When</th><th>Who</th><th>What</th></tr>
     ${data.map((a) => `<tr><td>${when(a.at)}</td><td>${esc(a.who)}</td><td>${esc(a.action.replace(/_/g, ' '))}${a.subject ? ' · ' + esc(a.subject) : ''}${a.community ? ' · ' + esc(a.community) : ''}${a.detail ? ' · ' + esc(a.detail) : ''}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">Nothing yet.</td></tr>'}</table>`)
+}
+
+
+// ---- wf-22: trail areas (the free coffee, Q-58) ----
+// The owner picks an uploaded map, drags a loop around a trail network, names it and saves it. An area is saved as points on the earth
+// (not as part of a map file), so a map update leaves every area where it was. Anyone inside any area, out and moving, counts (a later step).
+const MAP_BUCKET = 'https://pub-bdde5cbc9ef549bab2bb38050a68c606.r2.dev/'
+let trailMap = null, mapProtocol = null
+const ringKm2 = (ring) => { const mlat = ring.reduce((s, p) => s + p[1], 0) / ring.length, kx = 111320 * Math.cos((mlat * Math.PI) / 180); let s = 0
+  ring.forEach((p, i) => { const q = ring[(i + 1) % ring.length]; s += p[0] * kx * q[1] * 110540 - q[0] * kx * p[1] * 110540 }); return Math.abs(s) / 2 / 1e6 }
+const cross2 = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+const segHit = (a, b, c, d) => { const d1 = cross2(c, d, a), d2 = cross2(c, d, b), d3 = cross2(a, b, c), d4 = cross2(a, b, d); return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)) }
+const hitPoint = (a, b, c, d) => { const t = cross2(c, d, a) / (cross2(c, d, a) - cross2(c, d, b)); return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t] }
+// the same three checks the server makes (it is the one that decides): shape, crossing itself, under 1 km²
+function ringProblem(ring) {
+  const n = ring.length; if (n < 3 || n > 400) return 'shape'
+  for (let i = 0; i < n; i++) for (let j = i + 2; j < n; j++) { if (i === 0 && j === n - 1) continue; if (segHit(ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n])) return 'crossing' }
+  return ringKm2(ring) < 1 ? 'small' : null
+}
+// a loop drawn past its own start crosses itself: cut off the tail before the crossing, as a lasso does
+function trimLoop(p) {
+  for (let i = 0; i < p.length - 1; i++) for (let j = i + 2; j < p.length - 1; j++) if (segHit(p[i], p[i + 1], p[j], p[j + 1])) return [hitPoint(p[i], p[i + 1], p[j], p[j + 1]), ...p.slice(i + 1, j + 1)]
+  return p
+}
+function simplify(pts, tol) {
+  if (pts.length < 3) return pts
+  const a = pts[0], b = pts[pts.length - 1], L = Math.hypot(b.x - a.x, b.y - a.y) || 1
+  let max = 0, idx = 0
+  for (let i = 1; i < pts.length - 1; i++) { const d = Math.abs((b.x - a.x) * (a.y - pts[i].y) - (a.x - pts[i].x) * (b.y - a.y)) / L; if (d > max) { max = d; idx = i } }
+  return max <= tol ? [a, b] : simplify(pts.slice(0, idx + 1), tol).slice(0, -1).concat(simplify(pts.slice(idx), tol))
+}
+const TRAIL_STYLE = (url) => ({
+  version: 8,
+  glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
+  sources: { base: { type: 'vector', url: `pmtiles://${url}`, attribution: '© OpenStreetMap contributors' } },
+  layers: [
+    { id: 'bg', type: 'background', paint: { 'background-color': '#F3F1EA' } },
+    { id: 'earth', type: 'fill', source: 'base', 'source-layer': 'earth', paint: { 'fill-color': '#ECE9DE' } },
+    { id: 'wood', type: 'fill', source: 'base', 'source-layer': 'landuse', filter: ['in', ['get', 'kind'], ['literal', ['park', 'forest', 'wood', 'nature_reserve', 'national_park']]], paint: { 'fill-color': '#DCE6CB' } },
+    { id: 'water', type: 'fill', source: 'base', 'source-layer': 'water', paint: { 'fill-color': '#B9D7E6' } },
+    { id: 'road-minor', type: 'line', source: 'base', 'source-layer': 'roads', filter: ['in', ['get', 'kind'], ['literal', ['minor_road', 'medium_road', 'other']]], paint: { 'line-color': '#D2CCBC', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 15, 2.5] } },
+    { id: 'road-major', type: 'line', source: 'base', 'source-layer': 'roads', filter: ['in', ['get', 'kind'], ['literal', ['major_road', 'highway']]], paint: { 'line-color': '#BDB49C', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 15, 4] } },
+    { id: 'trails', type: 'line', source: 'base', 'source-layer': 'roads', filter: ['==', ['get', 'kind'], 'path'], paint: { 'line-color': '#8A6A45', 'line-dasharray': [3, 1.6], 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.9, 15, 1.8] } },
+    { id: 'places', type: 'symbol', source: 'base', 'source-layer': 'places', filter: ['in', ['get', 'kind'], ['literal', ['locality', 'neighbourhood', 'macrohood']]], layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': 12 }, paint: { 'text-color': '#3A3F37', 'text-halo-color': '#F3F1EA', 'text-halo-width': 1.4 } },
+  ],
+})
+const trailMsg = (e) => ({ small: 'That loop is too small, or it crosses itself. Try again.', crossing: 'That loop is too small, or it crosses itself. Try again.', shape: 'That loop can’t be used. Try again.', name: 'Please give the area a name.' }[e.message] || say(e))
+
+async function viewTrailAreas(regionId) {
+  if (trailMap) { trailMap.remove(); trailMap = null }
+  const { data: maps } = await api('trail_maps')
+  if (!maps.length) return shell('trail-areas', `<h1>Trail areas</h1><p class="hint">There is no uploaded map yet. Upload a map first; areas are drawn on a map.</p>`)
+  const cur = maps.find((m) => m.id === regionId) || maps[0]
+  const { data: areas } = await api('trail_areas', { region: cur.id })
+  const fmt = (iso) => new Date(iso).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+  // an update notice, once: the map's version changed since this browser last looked
+  let note = ''
+  try { const k = `ts.console.mapver.${cur.slug}`, seen = localStorage.getItem(k); if (seen && Number(seen) !== cur.version && areas.length) note = `<p class="okmsg">The ${esc(cur.name)} map was updated on ${new Date(cur.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}. Your ${areas.length} area${areas.length === 1 ? ' is' : 's are'} exactly where you drew ${areas.length === 1 ? 'it' : 'them'}.</p>`; localStorage.setItem(k, String(cur.version)) } catch { /* the notice is a nicety */ }
+  shell('trail-areas', `<h1>Trail areas</h1><p class="hint">Where time on the trail counts towards the free coffee. Anyone inside any area, out and moving, counts; anywhere else doesn’t.</p>
+    <div class="row" style="margin-top:14px"><label for="mapsel" style="margin:0">Map to draw on</label>
+      <select id="mapsel">${maps.map((m) => `<option value="${m.id}" ${m.id === cur.id ? 'selected' : ''}>${esc(m.name)} · updated ${esc(fmt(m.updated_at))}</option>`).join('')}</select><small class="muted">the uploaded maps</small></div>${note}
+    <div class="ta"><div id="taside"></div><div id="tamap"></div></div>`)
+  $('#mapsel').onchange = (e) => { location.hash = `#/trail-areas/${e.target.value}` }
+
+  const url = MAP_BUCKET + cur.file
+  if (!mapProtocol) { mapProtocol = new pmtiles.Protocol(); maplibregl.addProtocol('pmtiles', mapProtocol.tile) }
+  const file = new pmtiles.PMTiles(url); mapProtocol.add(file)
+  let hdr = null; try { hdr = await file.getHeader() } catch { /* the map still opens without it */ }
+  const map = (trailMap = new maplibregl.Map({ container: 'tamap', style: TRAIL_STYLE(url), center: hdr ? [(hdr.minLon + hdr.maxLon) / 2, (hdr.minLat + hdr.maxLat) / 2] : [22.46, -33.96], zoom: 10, attributionControl: { compact: true } }))
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+  const inMap = (ring) => !hdr || ring.some((p) => p[0] >= hdr.minLon && p[0] <= hdr.maxLon && p[1] >= hdr.minLat && p[1] <= hdr.maxLat)
+  const fc = () => ({ type: 'FeatureCollection', features: areas.map((a) => ({ type: 'Feature', properties: { id: a.id, name: a.name, out: inMap(a.ring) ? 0 : 1 }, geometry: { type: 'Polygon', coordinates: [[...a.ring, a.ring[0]]] } })) })
+  let mode = 'idle', draft = null, trace = [], message = ''
+  map.on('load', () => {
+    if (hdr) map.fitBounds([[hdr.minLon, hdr.minLat], [hdr.maxLon, hdr.maxLat]], { padding: 20, animate: false })
+    map.addSource('areas', { type: 'geojson', data: fc() })
+    map.addLayer({ id: 'areas-fill', type: 'fill', source: 'areas', paint: { 'fill-color': ['case', ['==', ['get', 'out'], 1], '#9A9A9A', '#5A9A5B'], 'fill-opacity': 0.35 } })
+    map.addLayer({ id: 'areas-line', type: 'line', source: 'areas', paint: { 'line-color': ['case', ['==', ['get', 'out'], 1], '#777', '#3E7A40'], 'line-width': 1.6 } })
+    map.addLayer({ id: 'areas-name', type: 'symbol', source: 'areas', layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': 12 }, paint: { 'text-color': '#1E3A2C', 'text-halo-color': '#fff', 'text-halo-width': 1.4 } })
+    map.addSource('draft', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+    map.addLayer({ id: 'draft-fill', type: 'fill', source: 'draft', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#5A9A5B', 'fill-opacity': 0.35 } })
+    map.addLayer({ id: 'draft-line', type: 'line', source: 'draft', paint: { 'line-color': '#B4492C', 'line-width': 2, 'line-dasharray': [3, 2] } })
+  })
+  const showDraft = (ring, closed) => map.getSource('draft')?.setData({ type: 'FeatureCollection', features: ring && ring.length > 1 ? [{ type: 'Feature', properties: {}, geometry: closed ? { type: 'Polygon', coordinates: [[...ring, ring[0]]] } : { type: 'LineString', coordinates: ring } }] : [] })
+
+  const side = () => {
+    const outsideTag = (a) => (inMap(a.ring) ? '' : ' · <b>Outside this map</b>')
+    const list = areas.length ? areas.map((a) => `<div class="arow"><b>${esc(a.name)}</b><small>${Math.round(Number(a.area_km2))} km² · added ${esc(new Date(a.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}${outsideTag(a)}</small><button class="btn small warn" data-del="${a.id}" data-n="${esc(a.name)}">Delete</button></div>`).join('') : `<p class="muted">No trail areas yet. Zoom to a town, press <b>Draw an area</b> and circle where the trails are.</p>`
+    if (mode === 'drawing') return `<h2>Areas on ${esc(cur.name)} (${areas.length})</h2><p class="muted">Press on the map and drag a loop around the trail network. Let go to close the shape. It doesn’t need to be a neat circle.</p><button class="btn" id="tacancel">Cancel</button>`
+    if (mode === 'naming') return `<h2>New area</h2><label for="taname">Name</label><input id="taname" type="text" maxlength="60" placeholder="e.g. George, mountain side" autofocus><p class="muted">About <b>${Math.round(ringKm2(draft))} km²</b>. Anyone inside, out and moving, counts.</p>
+      <div class="col"><button class="btn go" id="tasave">Save area</button><button class="btn" id="taagain">Draw again</button><button class="btn" id="tacancel">Cancel</button></div>`
+    return `<h2>Areas on ${esc(cur.name)} (${areas.length})</h2>${message ? `<p class="badmsg">${esc(message)}</p>` : ''}${list}<p class="row"><button class="btn go" id="tadraw">${areas.length ? 'Draw another area' : 'Draw an area'}</button></p>${areas.length ? '<p class="muted">Anyone inside any of these areas, out and moving, counts towards their free coffee. Anywhere else doesn’t.</p>' : ''}`
+  }
+  const render = () => {
+    $('#taside').innerHTML = side()
+    const on = (id, f) => { const b = $(id); if (b) b.onclick = f }
+    on('#tadraw', () => { message = ''; mode = 'drawing'; render() })
+    on('#tacancel', () => { mode = 'idle'; draft = null; message = ''; showDraft(null); map.dragPan.enable(); render() })
+    on('#taagain', () => { mode = 'drawing'; draft = null; showDraft(null); render() })
+    on('#tasave', () => guard(async () => {
+      const name = $('#taname').value.trim(); if (!name) return toast('Please give the area a name.')
+      try { await api('add_trail_area', { region: cur.id, name, ring: draft }) } catch (e) { if (['sign_in', 'two_step'].includes(e.message)) throw e; message = trailMsg(e); mode = 'idle'; draft = null; showDraft(null); return render() }
+      toast('Saved.'); viewTrailAreas(cur.id)
+    }))
+    document.querySelectorAll('[data-del]').forEach((b) => (b.onclick = () => guard(async () => {
+      if (!(await confirmBox({ title: `Delete “${b.dataset.n}”?`, text: 'People inside it stop earning coffee time there. Time already earned stays.', verb: 'Delete area', danger: true }))) return
+      await api('delete_trail_area', { id: b.dataset.del }); toast('Deleted.'); viewTrailAreas(cur.id)
+    })))
+    map.getCanvas().style.cursor = mode === 'drawing' ? 'crosshair' : ''
+    if (mode === 'naming') $('#taname')?.focus()
+  }
+  // the lasso: press and drag, let go
+  let down = false
+  const add = (e) => { const last = trace[trace.length - 1], p = e.point; if (!last || Math.hypot(p.x - last.x, p.y - last.y) >= 3) { trace.push({ x: p.x, y: p.y, ll: [e.lngLat.lng, e.lngLat.lat] }); showDraft(trace.map((t) => t.ll), false) } }
+  const start = (e) => { if (mode !== 'drawing') return; down = true; trace = []; map.dragPan.disable(); add(e) }
+  const move = (e) => { if (down) add(e) }
+  const stop = () => {
+    if (!down) return; down = false; map.dragPan.enable()
+    let pts = trace; for (let tol = 3; pts.length > 200 && tol < 40; tol += 3) pts = simplify(trace, tol); if (trace.length > 2) pts = simplify(trace, 3)
+    let ring = pts.map((t) => t.ll); ring = trimLoop(ring)
+    const problem = ringProblem(ring)
+    if (problem) { message = problem === 'shape' ? 'That loop can’t be used. Try again.' : 'That loop is too small, or it crosses itself. Try again.'; mode = 'idle'; showDraft(null); return render() }
+    draft = ring; mode = 'naming'; showDraft(ring, true); render()
+  }
+  map.on('mousedown', start); map.on('mousemove', move); map.on('mouseup', stop)
+  map.on('touchstart', start); map.on('touchmove', move); map.on('touchend', stop)
+  render()
 }
 
 start()
