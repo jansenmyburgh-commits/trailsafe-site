@@ -454,9 +454,10 @@ const TRAIL_STYLE = (url) => ({
   sources: { base: { type: 'vector', url: `pmtiles://${url}`, attribution: '© OpenStreetMap contributors' } },
   layers: [
     { id: 'bg', type: 'background', paint: { 'background-color': '#F3F1EA' } },
-    { id: 'earth', type: 'fill', source: 'base', 'source-layer': 'earth', paint: { 'fill-color': '#ECE9DE' } },
-    { id: 'wood', type: 'fill', source: 'base', 'source-layer': 'landuse', filter: ['in', ['get', 'kind'], ['literal', ['park', 'forest', 'wood', 'nature_reserve', 'national_park']]], paint: { 'fill-color': '#DCE6CB' } },
-    { id: 'water', type: 'fill', source: 'base', 'source-layer': 'water', paint: { 'fill-color': '#B9D7E6' } },
+    { id: 'earth', type: 'fill', source: 'base', 'source-layer': 'earth', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#ECE9DE' } },
+    { id: 'wood', type: 'fill', source: 'base', 'source-layer': 'landuse', filter: ['all', ['==', ['geometry-type'], 'Polygon'], ['in', ['get', 'kind'], ['literal', ['park', 'forest', 'wood', 'nature_reserve', 'national_park']]]], paint: { 'fill-color': '#DCE6CB' } },
+    { id: 'water', type: 'fill', source: 'base', 'source-layer': 'water', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#B9D7E6' } },
+    { id: 'water-lines', type: 'line', source: 'base', 'source-layer': 'water', filter: ['in', ['get', 'kind'], ['literal', ['river', 'stream']]], paint: { 'line-color': '#B9D7E6', 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.5, 15, 2.5] } },
     { id: 'road-minor', type: 'line', source: 'base', 'source-layer': 'roads', filter: ['in', ['get', 'kind'], ['literal', ['minor_road', 'medium_road', 'other']]], paint: { 'line-color': '#D2CCBC', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 15, 2.5] } },
     { id: 'road-major', type: 'line', source: 'base', 'source-layer': 'roads', filter: ['in', ['get', 'kind'], ['literal', ['major_road', 'highway']]], paint: { 'line-color': '#BDB49C', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.8, 15, 4] } },
     { id: 'trails', type: 'line', source: 'base', 'source-layer': 'roads', filter: ['==', ['get', 'kind'], 'path'], paint: { 'line-color': '#8A6A45', 'line-dasharray': [3, 1.6], 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 0.9, 15, 1.8] } },
