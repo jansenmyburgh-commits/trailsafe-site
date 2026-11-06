@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Redeem a free coffee | TrailSafe</title>
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/style.css">
+<style>
+.cf{max-width:360px;margin:0 auto;padding:44px 20px 40px;text-align:center}
+.cf h1{font-size:1.9rem;color:var(--forest)}
+.cf .sub{color:var(--muted);margin-top:4px}
+.cf label{display:block;text-align:left;font-weight:700;font-size:.85rem;color:var(--muted);margin:26px 0 6px}
+.cf input{width:100%;box-sizing:border-box;border:1.5px solid var(--forest);border-radius:12px;background:#fff;padding:14px;text-align:center;font:400 2rem "Young Serif",Georgia,serif;letter-spacing:.35em;color:var(--forest)}
+.cf button{margin-top:16px;border:0;border-radius:12px;background:var(--forest);color:var(--cream);font:700 1.05rem Figtree,sans-serif;padding:13px 34px;cursor:pointer}
+.cf button[disabled]{opacity:.5}
+.cf .res{margin-top:18px;border-radius:12px;padding:12px 14px;text-align:left;line-height:1.45}
+.cf .res b{display:block;font-size:1.1rem}
+.cf .ok{background:#EEF1E6;color:var(--forest)}
+.cf .bad{background:#F6E3DA;color:#8A3A1F}
+.cf .note{margin-top:20px;font-size:.9rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="cf">
+<h1 id="shop">&nbsp;</h1>
+<p class="sub" id="sub">Redeem a free coffee</p>
+<div id="form" hidden>
+<label for="code">The member’s 5-digit code</label>
+<input id="code" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="off" placeholder="•••••">
+<button id="go" type="button">Confirm</button>
+<div id="res" role="status" aria-live="polite"></div>
+<p class="note">Hand the coffee over only after you see “Coffee confirmed”.</p>
+</div>
+<div id="nolink" class="res bad" hidden><b>This link isn’t working</b>Ask TrailSafe for a new one: <a href="mailto:hello@trailsafety.app">hello@trailsafety.app</a></div>
+</div>
+<script>
+const FN = 'https://qpezqayqbghujlwjgemu.supabase.co/functions/v1/coffee'
+const v = new URLSearchParams(location.search).get('v') || ''
+const $ = (id) => document.getElementById(id)
+const call = (body) => fetch(FN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json())
+const show = (cls, head, text) => { $('res').innerHTML = `<div class="res ${cls}"><b>${head}</b>${text}</div>` }
+;(async () => {
+  let shop = null
+  try { shop = (await call({ v })).shop } catch { /* offline: handled below */ }
+  if (!shop) { $('shop').textContent = 'Redeem a free coffee'; $('sub').hidden = true; $('nolink').hidden = false; return }
+  $('shop').textContent = shop
+  document.title = shop + ' · Redeem a free coffee'
+  $('form').hidden = false
+  const go = async () => {
+    const code = $('code').value.replace(/\D/g, '')
+    if (code.length !== 5) return show('bad', 'Enter the 5 digits', 'The member’s code has 5 digits.')
+    $('go').disabled = true
+    try {
+      const { result } = await call({ v, code })
+      if (result === 'ok') { show('ok', '✓ Coffee confirmed', 'One free coffee for a TrailSafe member. Thank you for supporting the trails.'); $('code').value = '' }
+      else if (result === 'wait') show('bad', 'Please wait a minute', 'Too many wrong codes in a row. Try again in a minute.')
+      else show('bad', 'That code isn’t valid', 'It may have expired or been used. Ask the member to get a new one.')
+    } catch { show('bad', 'No connection', 'Check your signal and try again.') }
+    $('go').disabled = false
+  }
+  $('go').onclick = go
+  $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') go() })
+  $('code').addEventListener('input', () => { $('res').innerHTML = '' })
+})()
+</script>
+</body>
+</html>

@@ -131,7 +131,7 @@ async function refreshCounts() {
     counts = { requests: r.data.filter((x) => x.status === 'new').length, feedback: f.data.filter((x) => x.status === 'new').length }
   } catch { /* the counts are a nicety */ }
 }
-const NAV = [['communities', 'Communities'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas']]
+const NAV = [['communities', 'Communities'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee']]
 function shell(active, inner) {
   const badge = (k) => (k === 'requests' && counts.requests ? `<span class="count">${counts.requests}</span>` : k === 'feedback' && counts.feedback ? `<span class="count">${counts.feedback}</span>` : '')
   $('#app').innerHTML = `<div class="layout"><nav><div class="brand">TrailSafe</div><div class="sub">Owner console</div>
@@ -160,6 +160,7 @@ function route() {
     if (p === 'health') return viewHealth()
     if (p === 'audit') return viewAudit()
     if (p === 'trail-areas') return viewTrailAreas(a)
+    if (p === 'coffee') return viewCoffee()
     return viewCommunities()
   })
 }
@@ -314,20 +315,39 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 
 // ---- E: edit community ----
 async function viewEdit(id) {
-  const [{ data: info }, { data: members }, { data: regions }] = await Promise.all([api('community_info', { community: id }), api('community_members', { community: id }), api('regions')])
+  const [{ data: info }, { data: members }, { data: regions }, { data: cof }] = await Promise.all([api('community_info', { community: id }), api('community_members', { community: id }), api('regions'), api('community_coffee', { community: id })])
+  const cf = (cof && cof[0]) || {}
+  const vlink = cf.link_token ? `https://trailsafety.app/coffee/?v=${cf.link_token}` : ''
   if (!info) return toast('Unknown community.')
   const admins = members.filter((m) => m.role === 'admin')
   shell('communities', `<p><a href="#/community/${id}">‹ ${esc(info.name)}</a></p><h1>Edit community</h1>
     <div class="panel"><label for="nm">Community name</label><input id="nm" type="text" value="${esc(info.name)}">
     <label for="rg">Map region</label><select id="rg"><option value="">None yet</option>${regions.map((r) => `<option value="${r.id}" ${r.id === info.region_id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select>
     <label>Admins (${admins.length})</label>${admins.map((a) => `<p><b>${esc(a.full_name)}</b> · ${esc(a.email)} <button class="btn small" data-demote="${a.user_id}" data-n="${esc(a.full_name)}">Remove admin rights</button></p>`).join('') || '<p class="muted">No admins yet.</p>'}
+    <h2 style="margin-top:22px">Free coffee</h2>
+    <label for="cs">Sponsor</label><input id="cs" type="text" maxlength="80" value="${esc(cf.sponsor_name)}" placeholder="For example Spar Blanco">
+    <label for="cn">Coffee shop</label><input id="cn" type="text" maxlength="80" value="${esc(cf.shop_name)}" placeholder="For example Coffee Corner">
+    <label for="ca">Coffee shop address</label><input id="ca" type="text" maxlength="160" value="${esc(cf.shop_address)}" placeholder="For example 12 York Street, George">
+    <label>Vendor link</label>${vlink ? `<input type="text" readonly value="${esc(vlink)}" id="vl"><p class="muted">${cf.link_active ? 'Send this to the coffee shop on WhatsApp or email. They open it once and add it to their home screen.' : 'This coffee shop is switched off.'}</p>
+      <p><button class="btn small" id="cp">Copy link</button> <button class="btn small" id="nl">Make a new link</button> ${cf.link_active ? '<button class="btn small warn" id="off">Switch off the coffee shop</button>' : ''}</p>` : '<p class="muted">Add the coffee shop’s name and save, and its private link appears here. Leave all three empty and the community shows “Coffee vendor not yet set up” in the app.</p>'}
     <label for="q">Add an admin</label><input id="q" type="search" placeholder="Search people who have signed up by name or email"><div id="srch"></div>
     <div class="row" style="margin-top:20px"><button class="btn go" id="save">Save changes</button><a class="btn" href="#/community/${id}" style="text-decoration:none">Cancel</a></div></div>`)
   $('#save').onclick = () => guard(async () => {
     const name = $('#nm').value.trim(); if (!name) return toast('Give the community a name.')
     if (name !== info.name) await api('edit_community', { community: id, name })
     const region = $('#rg').value || null; if (region !== (info.region_id || null)) await api('set_region', { community: id, region })
+    const sp = $('#cs').value.trim(), sh = $('#cn').value.trim(), ad = $('#ca').value.trim()
+    if (sp !== (cf.sponsor_name || '') || sh !== (cf.shop_name || '') || ad !== (cf.shop_address || '')) await api('set_community_coffee', { community: id, sponsor: sp, shop: sh, address: ad })
     toast('Saved.'); location.hash = `#/community/${id}`
+  })
+  if ($('#cp')) $('#cp').onclick = async () => { try { await navigator.clipboard.writeText(vlink); toast('Link copied.') } catch { $('#vl').select(); toast('Select the link and copy it.') } }
+  if ($('#nl')) $('#nl').onclick = () => guard(async () => {
+    if (!(await confirmBox({ title: `Make a new vendor link for ${info.name}?`, text: 'The old link stops working at once. You will need to send the new one to the coffee shop.', verb: 'Make a new link' }))) return
+    await api('remake_vendor_link', { community: id }); toast('New link made.'); viewEdit(id)
+  })
+  if ($('#off')) $('#off').onclick = () => guard(async () => {
+    if (!(await confirmBox({ title: `Switch off the coffee shop for ${info.name}?`, text: 'Its link stops working and members see “Coffee vendor not yet set up”.', verb: 'Switch off', danger: true }))) return
+    await api('switch_off_vendor', { community: id }); toast('Switched off.'); viewEdit(id)
   })
   document.querySelectorAll('[data-demote]').forEach((b) => (b.onclick = () => guard(async () => {
     if (!(await confirmBox({ title: `Remove admin rights from ${b.dataset.n}?`, text: 'They stay a member.', verb: 'Remove admin rights' }))) return
@@ -344,6 +364,22 @@ async function viewEdit(id) {
       await api('set_role', { community: id, user: p.user_id, role: 'admin' }); toast('Done.'); viewEdit(id)
     })))
   }, 250)
+}
+
+// ---- Coffee (wf-23 S): suggestions and enquiries from the app, and each community's sponsor, coffee shop and coffees this month ----
+const LEAD_KIND = { suggest_shop: 'Coffee shop', suggest_sponsor: 'Sponsor', vendor_enquiry: 'Coffee shop', sponsor_enquiry: 'Sponsor' }
+async function viewCoffee() {
+  const [{ data: leads }, { data: coms }] = await Promise.all([api('coffee_leads'), api('coffee_overview')])
+  const month = coms.reduce((n, c) => n + (c.redeemed_month || 0), 0)
+  const enq = leads.filter((l) => l.kind.endsWith('enquiry')).length
+  const tile = (big, label, line) => `<div class="tile"><div class="big">${esc(big)}</div><div class="lab">${esc(label)}</div><div class="line">${esc(line)}</div></div>`
+  shell('coffee', `<h1>Coffee</h1><p class="hint">Suggestions from members, enquiries, and each community’s sponsor and coffee shop.</p>
+    <div class="tiles three">${tile(leads.length - enq, 'Suggestions', 'waiting for you')}${tile(enq, 'Enquiries', 'from the menu forms')}${tile(month, 'Coffees redeemed', 'this month, all communities')}</div>
+    <h2>Suggestions and enquiries</h2>
+    ${leads.length ? `<table><tr><th>Business</th><th>Kind</th><th>From</th><th>Town / contact</th><th></th></tr>${leads.map((l) => `<tr><td><b>${esc(l.business)}</b>${l.note ? `<br><small class="muted">${esc(l.note)}</small>` : ''}</td><td>${LEAD_KIND[l.kind]}${l.kind.endsWith('enquiry') ? ' · enquiry' : ' · suggestion'}</td><td>${esc(l.from_name || '')}<br><small class="muted">${esc(l.community || '')} · ${when(l.created_at)}</small></td><td>${esc([l.town, l.contact].filter(Boolean).join(' · '))}</td><td><button class="btn small" data-done="${l.id}">Done</button></td></tr>`).join('')}</table>` : '<p class="muted">Nothing waiting.</p>'}
+    <h2>Communities</h2><table><tr><th>Community</th><th>Sponsor</th><th>Coffee shop</th><th>Vendor link</th><th>This month</th><th></th></tr>${coms.map((c) => `<tr><td><b>${esc(c.community)}</b></td>${c.set_up || c.shop_name ? `<td>${esc(c.sponsor_name || '—')}</td><td>${esc(c.shop_name || '—')}</td><td>${c.set_up ? 'Active' : 'Switched off'}</td>` : '<td colspan="3" class="muted">Not yet set up</td>'}<td>${c.redeemed_month}</td><td><a class="btn small" href="#/community/${c.community_id}/edit" style="text-decoration:none">${c.shop_name ? 'Edit' : 'Set up'}</a></td></tr>`).join('')}</table>
+    <p class="hint">The sponsor and coffee shop are set up on each community’s Edit page.</p>`)
+  document.querySelectorAll('[data-done]').forEach((b) => (b.onclick = () => guard(async () => { await api('coffee_lead_done', { id: +b.dataset.done }); toast('Done.'); viewCoffee() })))
 }
 
 // ---- F / G: people ----
