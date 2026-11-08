@@ -116,7 +116,7 @@ async function showAuthenticatorStep() {
 }
 
 // ---------- the console ----------
-let me = null, counts = { requests: 0, feedback: 0 }
+let me = null, counts = { requests: 0, feedback: 0, problems: 0 }
 async function start() {
   const { data: s } = await sb.auth.getSession()
   if (!s.session) return showEmailStep()
@@ -127,13 +127,13 @@ async function start() {
 }
 async function refreshCounts() {
   try {
-    const [r, f] = await Promise.all([api('group_requests'), api('feedback')])
-    counts = { requests: r.data.filter((x) => x.status === 'new').length, feedback: f.data.filter((x) => x.status === 'new').length }
+    const [r, f, pr] = await Promise.all([api('group_requests'), api('feedback'), api('problems')])
+    counts = { requests: r.data.filter((x) => x.status === 'new').length, feedback: f.data.filter((x) => x.status === 'new').length, problems: pr.data.filter((x) => x.status === 'new').length }
   } catch { /* the counts are a nicety */ }
 }
-const NAV = [['communities', 'Communities'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee']]
+const NAV = [['communities', 'Communities'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee']]
 function shell(active, inner) {
-  const badge = (k) => (k === 'requests' && counts.requests ? `<span class="count">${counts.requests}</span>` : k === 'feedback' && counts.feedback ? `<span class="count">${counts.feedback}</span>` : '')
+  const badge = (k) => (k === 'requests' && counts.requests ? `<span class="count">${counts.requests}</span>` : k === 'feedback' && counts.feedback ? `<span class="count">${counts.feedback}</span>` : k === 'problems' && counts.problems ? `<span class="count">${counts.problems}</span>` : '')
   $('#app').innerHTML = `<div class="layout"><nav><div class="brand">TrailSafe</div><div class="sub">Owner console</div>
     ${NAV.map(([k, l]) => `<a href="#/${k}" class="${k === active ? 'on' : ''}">${l}${badge(k)}</a>`).join('')}
     <div class="who">${esc(me)}<br><button id="signout">Sign out</button></div></nav><main>${inner}</main></div>`
@@ -156,6 +156,7 @@ function route() {
     if (p === 'request') return viewRequest(a)
     if (p === 'feedback') return viewFeedback(q.get('f') || 'all')
     if (p === 'report') return viewReport(a)
+    if (p === 'problems') return viewProblems()
     if (p === 'alerts') return viewAlerts()
     if (p === 'health') return viewHealth()
     if (p === 'audit') return viewAudit()
@@ -423,6 +424,17 @@ async function viewRequest(id) {
   shell('requests', `<p><a href="#/requests">‹ Group requests</a></p><h1>${esc(r.group_name)}</h1><p class="hint">Asked by ${esc(r.asker_name || 'a former member')}${r.asker_email ? ' · ' + esc(r.asker_email) : ''} · ${when(r.created_at)} · ${pill(r.status)}</p>
     <div class="panel"><label>Where do they run, hike or ride?</label><p>${esc(r.where_text)}</p><label>How we can verify the group</label><p>${esc(r.how_to_verify)}</p>
     <div class="row" style="margin-top:18px">${r.status === 'done' ? '<span class="muted">A community was created from this request.</span>' : `<a class="btn go" href="#/community/new?from=${id}" style="text-decoration:none">Create community</a>`}<a class="btn" href="#/requests" style="text-decoration:none">Back</a></div></div>`)
+}
+
+// ---- Problems the app found by itself (PROBLEMS-1): one row per kind of failure, with how often it happened ----
+async function viewProblems() {
+  const { data } = await api('problems'); counts.problems = data.filter((x) => x.status === 'new').length
+  shell('problems', `<h1>Problems</h1><p class="hint">Failures the app found by itself. One line for each kind of problem, with how many times it happened. No names, emails or positions. A line comes back as New if it happens again after you marked it Done.</p>
+    ${data.length ? `<table><tr><th>Last seen</th><th>Times</th><th>Where</th><th>Phone</th><th>What happened</th><th>Status</th><th></th></tr>
+    ${data.map((x) => `<tr><td>${when(x.last_seen)}</td><td>${x.times}</td><td>${esc(x.where_text || '')}</td><td>${esc([x.platform, x.os_version, x.model, x.app_version && 'app ' + x.app_version].filter(Boolean).join(' · '))}</td>
+      <td>${esc(x.message)}${x.stack ? `<details><summary>Stack</summary><pre style="white-space:pre-wrap;font-size:12px">${esc(x.stack)}</pre></details>` : ''}</td><td>${pill(x.status)}</td>
+      <td>${x.status === 'done' ? '' : `<button class="btn small go" data-sig="${x.signature}">Done</button>`}</td></tr>`).join('')}</table>` : '<p class="hint" style="margin-top:18px">Nothing has gone wrong.</p>'}`)
+  document.querySelectorAll('button[data-sig]').forEach((b) => (b.onclick = () => guard(async () => { await api('set_problem_status', { signature: b.dataset.sig, status: 'done' }); viewProblems() })))
 }
 
 // ---- Q / R: feedback ----
