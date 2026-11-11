@@ -26,7 +26,8 @@ async function api(action, args = {}) {
   if (!res.ok) throw new Error(j.error || String(res.status))
   return j
 }
-const say = (e) => ({ sign_in: 'Please sign in again.', two_step: 'The authenticator code is needed.', not_owner: 'This account is not the owner account.' }[e.message] || e.message)
+const say = (e) => ({ sign_in: 'Please sign in again.', two_step: 'The authenticator code is needed.', not_owner: 'This account is not the owner account.',
+  'unknown community': 'There’s no sponsor sheet for a demo or test community — only a real one.' }[e.message] || e.message)
 
 // ---------- confirm box (wf-14: every change names who and what, and says it is recorded) ----------
 function confirmBox({ title, text, verb, danger = false }) {
@@ -251,13 +252,16 @@ async function viewCommunity(id) {
   const [{ data: info }, { data: members }] = await Promise.all([api('community_info', { community: id }), api('community_members', { community: id })])
   if (!info) return toast('Unknown community.')
   const admins = members.filter((m) => m.role === 'admin').length
-  shell('communities', `<p><a href="#/communities">‹ Communities</a></p><div class="row" style="justify-content:space-between"><div><h1>${esc(info.name)} — ${members.length} member${members.length === 1 ? '' : 's'}</h1><p class="hint">${admins} admin${admins === 1 ? '' : 's'}</p></div><div class="row"><a class="btn" href="#/community/${id}/sponsor" style="text-decoration:none">Sponsor sheet</a><a class="btn" href="#/community/${id}/edit" style="text-decoration:none">Edit community</a></div></div>
+  shell('communities', `<p><a href="#/communities">‹ Communities</a></p><div class="row" style="justify-content:space-between"><div><h1>${esc(info.name)} — ${members.length} member${members.length === 1 ? '' : 's'}</h1><p class="hint">${admins} admin${admins === 1 ? '' : 's'}</p></div><div class="row"><a class="btn" id="sponsorLink" href="#/community/${id}/sponsor" style="text-decoration:none">Sponsor sheet</a><a class="btn" href="#/community/${id}/edit" style="text-decoration:none">Edit community</a></div></div>
     <table><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr>
     ${members.map((m) => `<tr><td><b>${esc(m.full_name)}</b></td><td>${esc(m.email)}</td><td>${m.role === 'admin' ? 'Admin' : 'Member'}</td>
       <td class="row"><button class="btn small" data-role="${m.role === 'admin' ? 'member' : 'admin'}" data-u="${m.user_id}" data-n="${esc(m.full_name)}">${m.role === 'admin' ? 'Remove admin rights' : 'Make admin'}</button>
       <button class="btn small" data-mv="${m.user_id}" data-n="${esc(m.full_name)}">Move to…</button>
       <button class="btn small warn" data-rm="${m.user_id}" data-n="${esc(m.full_name)}">Remove</button></td></tr>`).join('')}</table>
     <p class="hint">Names and activity only — never a location.</p>`)
+  // The link's href keeps the address bar right, but a click always opens the sheet itself — a plain hash link does nothing on a second
+  // click to the same hash (the browser sees no change), which left an error on screen looking like a dead button.
+  const sponsorLink = $('#sponsorLink'); if (sponsorLink) sponsorLink.onclick = (e) => { e.preventDefault(); history.replaceState(null, '', `#/community/${id}/sponsor`); guard(() => viewSponsorSheet(id)) }
   document.querySelectorAll('[data-role]').forEach((b) => (b.onclick = () => guard(async () => {
     const admin = b.dataset.role === 'admin'
     if (!(await confirmBox(admin ? { title: `Make ${b.dataset.n} an admin of ${info.name}?`, text: 'They’ll be able to approve and remove members.', verb: 'Make admin' }
