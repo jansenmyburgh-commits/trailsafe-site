@@ -150,6 +150,7 @@ function route() {
     if (!p || p === 'communities') return viewCommunities()
     if (p === 'community' && a === 'new') return viewCreate(q.get('from'))
     if (p === 'community' && b === 'edit') return viewEdit(a)
+    if (p === 'community' && b === 'sponsor') return viewSponsorSheet(a)
     if (p === 'community') return viewCommunity(a)
     if (p === 'people') return viewPeople()
     if (p === 'requests') return viewRequests()
@@ -250,7 +251,7 @@ async function viewCommunity(id) {
   const [{ data: info }, { data: members }] = await Promise.all([api('community_info', { community: id }), api('community_members', { community: id })])
   if (!info) return toast('Unknown community.')
   const admins = members.filter((m) => m.role === 'admin').length
-  shell('communities', `<p><a href="#/communities">‹ Communities</a></p><div class="row" style="justify-content:space-between"><div><h1>${esc(info.name)} — ${members.length} member${members.length === 1 ? '' : 's'}</h1><p class="hint">${admins} admin${admins === 1 ? '' : 's'}</p></div><a class="btn" href="#/community/${id}/edit" style="text-decoration:none">Edit community</a></div>
+  shell('communities', `<p><a href="#/communities">‹ Communities</a></p><div class="row" style="justify-content:space-between"><div><h1>${esc(info.name)} — ${members.length} member${members.length === 1 ? '' : 's'}</h1><p class="hint">${admins} admin${admins === 1 ? '' : 's'}</p></div><div class="row"><a class="btn" href="#/community/${id}/sponsor" style="text-decoration:none">Sponsor sheet</a><a class="btn" href="#/community/${id}/edit" style="text-decoration:none">Edit community</a></div></div>
     <table><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr>
     ${members.map((m) => `<tr><td><b>${esc(m.full_name)}</b></td><td>${esc(m.email)}</td><td>${m.role === 'admin' ? 'Admin' : 'Member'}</td>
       <td class="row"><button class="btn small" data-role="${m.role === 'admin' ? 'member' : 'admin'}" data-u="${m.user_id}" data-n="${esc(m.full_name)}">${m.role === 'admin' ? 'Remove admin rights' : 'Make admin'}</button>
@@ -276,6 +277,29 @@ async function viewCommunity(id) {
     if (!(await confirmBox({ title: `Remove ${b.dataset.n} from ${info.name}?`, text: 'They lose access straight away and can ask to join again.', verb: 'Remove from community', danger: true }))) return
     await api('remove_member', { community: id, user: b.dataset.rm }); toast('Removed.'); viewCommunity(id)
   })))
+}
+
+// ---- SPONSOR-1: the one-page sponsor sheet, this period against the one before it. "Print" makes a clean PDF (the nav hides itself). ----
+async function viewSponsorSheet(id) {
+  const { data: s } = await api('sponsor_sheet', { community: id })
+  const change = (now, was) => {
+    if (was === 0) return now > 0 ? { text: 'New', cls: 'ok' } : { text: '—', cls: '' }
+    const pct = Math.round(((now - was) / was) * 100)
+    return { text: `${pct > 0 ? '+' : ''}${pct}%`, cls: pct > 0 ? 'ok' : pct < 0 ? 'bad' : '' }
+  }
+  const tile = (now, was, label, line) => { const c = change(now, was)
+    return `<div class="tile ${c.cls}"><div class="big">${esc(now)}</div><div class="lab">${esc(label)}</div><div class="line">${esc(line)} <b class="${c.cls}">${esc(c.text)}</b> vs the ${s.days} days before</div></div>` }
+  shell('communities', `<p class="no-print"><a href="#/community/${id}">‹ ${esc(s.community)}</a></p>
+    <div class="row no-print" style="justify-content:space-between"><div><h1>${esc(s.community)} — sponsor sheet</h1><p class="hint">Last ${s.days} days, against the ${s.days} days before. ${s.members_now} member${s.members_now === 1 ? '' : 's'} today.</p></div>
+    <button class="btn go" id="pr">Print this sheet</button></div>
+    <h1 class="print-only">${esc(s.community)}</h1><p class="hint print-only">A TrailSafe trail community · ${s.members_now} member${s.members_now === 1 ? '' : 's'} today · last ${s.days} days against the ${s.days} days before</p>
+    <div class="tiles three">
+      ${tile(s.this_period.typical_out_per_day, s.previous_period.typical_out_per_day, 'Typical members out a day', 'The usual busiest moment each day.')}
+      ${tile(s.this_period.hours_out, s.previous_period.hours_out, 'Hours spent out', 'Added up across every member.')}
+      ${tile(s.this_period.new_members, s.previous_period.new_members, 'New members joined', 'Approved into the community.')}
+    </div>
+    <p class="hint">Counts only — TrailSafe never shows a sponsor where a member was.</p>`)
+  const pr = $('#pr'); if (pr) pr.onclick = () => window.print()
 }
 
 // ---- C / S: create community (optionally from a group request) ----

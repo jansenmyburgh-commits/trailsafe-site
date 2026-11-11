@@ -72,3 +72,13 @@ input[type=text], input[type=email], input[type=search], select, textarea { widt
 .badmsg{background:var(--clay-soft);color:var(--clay);font-weight:700;border-radius:10px;padding:8px 12px}
 .col{display:flex;flex-direction:column;gap:8px}
 @media (max-width:760px){.ta{grid-template-columns:1fr}#tamap{height:420px}}
+
+/* SPONSOR-1: the sponsor sheet's own delta text (the tile's border already shows ok/bad; this is the "+18%" wording beside it) */
+b.ok{color:#2f9e5b} b.bad{color:#9a4c2e}
+.print-only{display:none}
+@media print{
+  nav, .no-print{display:none}
+  main{padding:0;max-width:none}
+  .print-only{display:block}
+  .tile{break-inside:avoid}
+}
