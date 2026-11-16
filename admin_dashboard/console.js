@@ -1,8 +1,12 @@
 // TrailSafe owner console (wf-14). One page: signs the owner in (email code, then an authenticator code) and talks to the owner-api server
 // function with that sign-in. Nothing secret is in this file: the database's master key lives only on the server.
+// Never inside another site's page (GitHub Pages cannot send the X-Frame-Options header, so the page checks for itself).
+if (window.top !== window.self) window.top.location = window.location
 const SUPABASE_URL = 'https://qpezqayqbghujlwjgemu.supabase.co'
 const SUPABASE_KEY = 'sb_publishable_sbcMyfC8UcLTJ0g-i2vduw_RGy7CiEp'
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, storageKey: 'trailsafe-owner' } })
+// The sign-in lives in sessionStorage: it dies with the tab, so no computer keeps a standing owner session (members' phones keep theirs, SE-1).
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, storageKey: 'trailsafe-owner', storage: window.sessionStorage } })
+try { localStorage.removeItem('trailsafe-owner') } catch { /* an older visit's session, no longer used */ }
 
 const TURNSTILE_SITE_KEY = '0x4AAAAAAFvFaEQHEPuX1Iu7'   // public by design
 const $ = (s) => document.querySelector(s)
@@ -73,7 +77,7 @@ function showEmailStep(msg = '') {
     if (!email) return
     $('#send').disabled = true
     let captchaToken_; try { captchaToken_ = await captchaToken() } catch { $('#e').textContent = 'The bot check did not pass. If you use a VPN, switch it off for a moment and try again.'; $('#send').disabled = false; return }
-    const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, captchaToken: captchaToken_ } })
+    const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false, captchaToken: captchaToken_ } })   // the owner account exists; this page creates none
     if (error) { $('#e').textContent = error.message; $('#send').disabled = false; return }
     showCodeStep(email)
   }
