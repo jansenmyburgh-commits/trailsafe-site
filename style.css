@@ -89,8 +89,7 @@ html { scroll-behavior: smooth; }
 .mug { width: 96px; height: 96px; justify-self: start; order: -1; }
 
 .closing { background: var(--forest); color: var(--cream); padding: 72px 0; text-align: center; }
-.closing .slogan { margin: 0 auto; max-width: 30em; color: var(--sage); font-size: 1.1rem; }
-.closing h2 { font-size: clamp(1.8rem, 5vw, 2.6rem); margin: 18px auto 0; }
+.closing h2 { font-size: clamp(1.8rem, 5vw, 2.6rem); margin: 0 auto; }
 .closing p { margin: 28px 0 0; }
 
 footer { border-top: 1px solid var(--forest-2); }
