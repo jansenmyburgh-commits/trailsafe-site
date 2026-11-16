@@ -67,6 +67,7 @@ html { scroll-behavior: smooth; }
 .btn-light { display: inline-block; padding: 15px 28px; border-radius: 14px; background: var(--cream); color: var(--forest); font-weight: 700; font-size: 1.1rem; text-decoration: none; }
 .btn-light:hover, .btn-light:focus { background: #fff; }
 .soon { color: var(--sage); font-size: 0.95rem; }
+.btn-off { display: inline-block; padding: 13px 24px; border: 1.5px solid var(--sage); border-radius: 14px; color: var(--cream); font-weight: 600; }
 .free { margin: 18px 0 0; color: var(--sage); font-size: 0.95rem; }
 .phone { justify-self: center; width: min(280px, 74vw); border: 9px solid #0F1F17; border-radius: 40px; background: #0F1F17; box-shadow: 0 24px 60px rgba(0,0,0,.35); overflow: hidden; }
 .phone img { display: block; width: 100%; height: auto; border-radius: 31px; }
