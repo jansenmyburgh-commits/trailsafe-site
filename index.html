@@ -16,7 +16,7 @@
 <meta property="og:url" content="https://trailsafety.app">
 <meta property="og:image" content="https://trailsafety.app/og-image-1200x630.png">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="stylesheet" href="/style.css?v=3">
+<link rel="stylesheet" href="/style.css?v=4">
 </head>
 <body>
 
@@ -24,73 +24,96 @@
   <div class="wrap">
     <div class="top">
       <a href="/" aria-label="TrailSafe home"><img class="logo" src="logo.svg" alt="TrailSafe" width="188" height="44"></a>
-      <input type="checkbox" id="menu" class="menu-toggle" aria-label="Open the menu" style="position:absolute;opacity:0;width:44px;height:44px;right:20px;margin:0">
+      <input type="checkbox" id="menu" class="menu-toggle" aria-label="Open the menu">
       <label for="menu" class="burger" aria-hidden="true"><span></span><span></span><span></span></label>
       <nav aria-label="Sections">
         <a href="#how">How it works</a>
         <a href="#coffee">Free coffee</a>
-        <a href="/partners/">Coffee shops and sponsors</a>
+        <a href="/partners/">Partners</a>
+        <a class="nav-cta" href="https://play.google.com/store/apps/details?id=za.co.trailsafe.app">Get the app</a>
       </nav>
     </div>
-    <h1>A trail community that knows where other community members are is a safer community.</h1>
-    <p class="lead">See how many community members are out on the trails near you, and alert members nearby if you need help.</p>
-    <p class="tag">Free for you and your community.</p>
-    <div class="stores">
-      <div class="store" role="img" aria-label="Android app, coming soon"><span>Coming soon</span><b>Android</b></div>
-      <div class="store" role="img" aria-label="iPhone app, coming soon"><span>Coming soon</span><b>iPhone</b></div>
+    <div class="hero-grid">
+      <div class="hero-text">
+        <h1>Know who’s out on the trails before you go.</h1>
+        <p class="lead">TrailSafe shows how many members of your trail community are out near you, and lets you alert the ones nearby if you need help.</p>
+        <div class="actions">
+          <a class="btn-light" href="https://play.google.com/store/apps/details?id=za.co.trailsafe.app">Get it on Android</a>
+          <span class="soon">iPhone coming soon</span>
+        </div>
+        <p class="free">Free for you and your community.</p>
+      </div>
+      <div class="phone"><img src="img/app-out-map.jpg" alt="The TrailSafe map while you are out: members near you, how far away they are, and the ALERT button" width="640" height="1280"></div>
     </div>
   </div>
 </header>
 
-<main class="wrap">
-  <section class="cards" id="how" aria-label="What TrailSafe does">
-    <article class="card">
-      <h2>Join and get approved</h2>
-      <p>Your community leader approves each member and gives them a community join code. Your community stays secure, and just for its members.</p>
-      <p class="small">Are you a trail community leader? Write to <a href="mailto:jansen@trailsafety.app">jansen@trailsafety.app</a> to set up your community.</p>
-    </article>
-    <article class="card">
+<main>
+  <section class="points wrap" id="how" aria-label="What TrailSafe does">
+    <article>
+      <span class="num">1</span>
       <h2>Know before you go</h2>
-      <p>Before you go, check from anywhere how many community members are out on the trails near you, then decide when to go.</p>
+      <p>See how many members are out near you, from anywhere. Then decide when to go.</p>
     </article>
-    <article class="card">
+    <article>
+      <span class="num">2</span>
       <h2>Send an alert</h2>
-      <p>One button lets members nearby know you need help, and where you are.</p>
+      <p>One button tells members nearby that you need help, and where you are.</p>
       <p class="honest">Not an emergency service. In an emergency, always call 112 as well.</p>
     </article>
+    <article>
+      <span class="num">3</span>
+      <h2>Members only</h2>
+      <p>Your community leader approves every member. Nobody else gets in.</p>
+    </article>
   </section>
 
-  <section class="privacy" aria-label="Privacy">
-    <p class="main">Visible only to approved community members, and only while you're out.</p>
-    <p>For those who prefer to stay private, you can help your community while you’re out without showing your exact location.</p>
-    <p class="quiet">No phone number needed.</p>
-  </section>
-
-  <section class="coffee" id="coffee" aria-labelledby="coffee-h">
-    <div class="coffee-in">
-      <div>
-        <h2 id="coffee-h">Free coffee for making the trails safer.</h2>
-        <p>Every hour you are out and helping your community stay safe counts toward your free cup of coffee. Your trail community’s coffee shop and a local sponsor make it possible, and every member who earns a coffee sees who sponsored it.</p>
-        <ol class="steps">
-          <li><b>Go out on the trails.</b> Open TrailSafe, tap Start, and the time you spend on your trails counts.</li>
-          <li><b>Watch your mug fill.</b> A little mug on the map shows your progress.</li>
-          <li><b>Redeem it.</b> When it is full, show your code at your community’s coffee shop.</li>
-        </ol>
-        <p class="small">TrailSafe is free for you and your community. Coffee shops and sponsors are set up community by community, so the coffee arrives in your trail community once its coffee shop and sponsor have joined.</p>
-        <p><a class="cta" href="/partners/">Own a coffee shop or a local business? Partner with your trail community</a></p>
-      </div>
-      <svg class="mug" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="mg" x1="0" y1="1" x2="0" y2="0"><stop offset="0.42" stop-color="#8A5A33"/><stop offset="0.42" stop-color="#FFFFFF"/></linearGradient></defs><path d="M4 7h13v8a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z" fill="url(#mg)" stroke="#1E3A2C" stroke-width="1.5" stroke-linejoin="round"/><path d="M17 9h1.6a2.4 2.4 0 0 1 0 4.8H17" fill="none" stroke="#1E3A2C" stroke-width="1.5"/><path d="M8 2.6c-.8 1 .8 1.6 0 2.6M12 2.6c-.8 1 .8 1.6 0 2.6" fill="none" stroke="#1E3A2C" stroke-width="1.1" stroke-linecap="round"/></svg>
+  <section class="band" aria-label="Privacy">
+    <div class="wrap">
+      <p class="main">Visible only to approved community members, and only while you're out.</p>
+      <p>For those who prefer to stay private, you can help your community while you’re out without showing your exact location.</p>
+      <p class="quiet">No phone number needed.</p>
     </div>
   </section>
 
+  <section class="coffee wrap" id="coffee" aria-labelledby="coffee-h">
+    <div>
+      <h2 id="coffee-h">Free coffee for making the trails safer.</h2>
+      <p class="lead">Every hour you’re out counts toward a free cup at your community’s coffee shop.</p>
+      <ol class="steps">
+        <li><b>Tap Start.</b> Your time on the trails counts.</li>
+        <li><b>Watch your mug fill.</b> A little mug on the map shows your progress.</li>
+        <li><b>Show your code.</b> When it’s full, redeem it at the coffee shop.</li>
+      </ol>
+      <p class="small">The coffee arrives in your community once its coffee shop and sponsor have joined. <a href="/partners/">Own a coffee shop or a local business?</a></p>
+    </div>
+    <svg class="mug" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="mg" x1="0" y1="1" x2="0" y2="0"><stop offset="0.42" stop-color="#8A5A33"/><stop offset="0.42" stop-color="#FFFFFF"/></linearGradient></defs><path d="M4 7h13v8a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z" fill="url(#mg)" stroke="#1E3A2C" stroke-width="1.5" stroke-linejoin="round"/><path d="M17 9h1.6a2.4 2.4 0 0 1 0 4.8H17" fill="none" stroke="#1E3A2C" stroke-width="1.5"/><path d="M8 2.6c-.8 1 .8 1.6 0 2.6M12 2.6c-.8 1 .8 1.6 0 2.6" fill="none" stroke="#1E3A2C" stroke-width="1.1" stroke-linecap="round"/></svg>
+  </section>
+
+  <section class="closing" aria-label="For community leaders">
+    <div class="wrap">
+      <p class="slogan">A trail community that knows where other community members are is a safer community.</p>
+      <h2>Lead a trail community?<br>Set yours up.</h2>
+      <p><a class="btn-light" href="mailto:jansen@trailsafety.app?subject=Setting%20up%20my%20trail%20community">Write to us</a></p>
+    </div>
+  </section>
 </main>
 
 <footer>
-  <div class="wrap">
-    <p class="honest">Not an emergency service. In an emergency, always call 112 as well.</p>
-    <p><a href="mailto:jansen@trailsafety.app">jansen@trailsafety.app</a> · <a href="privacy.html">Privacy</a> · <a href="terms.html">Terms</a></p>
-    <p>© 2026 TrailSafe</p>
+  <div class="wrap foot">
+    <div>
+      <img class="logo" src="logo.svg" alt="TrailSafe" width="150" height="35">
+      <p class="honest">Not an emergency service. In an emergency, always call 112 as well.</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="/partners/">Partners</a>
+      <a href="/support/">Support</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="terms.html">Terms</a>
+      <a href="mailto:jansen@trailsafety.app">jansen@trailsafety.app</a>
+    </nav>
   </div>
+  <div class="wrap"><p class="copy">© 2026 TrailSafe</p></div>
 </footer>
 
 </body>
