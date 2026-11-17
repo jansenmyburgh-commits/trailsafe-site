@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <meta name="referrer" content="no-referrer">
-<title>Redeem a free coffee | TrailSafe</title>
+<title>Redeem a TrailSafe coffee | TrailSafe</title>
 <link rel="icon" href="/favicon.ico?v=2" sizes="48x48">
 <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
@@ -28,7 +28,7 @@
 <body>
 <div class="cf">
 <h1 id="shop">&nbsp;</h1>
-<p class="sub" id="sub">Redeem a free coffee</p>
+<p class="sub" id="sub">Redeem a TrailSafe coffee</p>
 <div id="form" hidden>
 <label for="code">The member’s 5-digit code</label>
 <input id="code" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="off" placeholder="•••••">
@@ -43,21 +43,22 @@ const FN = 'https://qpezqayqbghujlwjgemu.supabase.co/functions/v1/coffee'
 const v = new URLSearchParams(location.search).get('v') || ''
 const $ = (id) => document.getElementById(id)
 const call = (body) => fetch(FN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json())
+const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const show = (cls, head, text) => { $('res').innerHTML = `<div class="res ${cls}"><b>${head}</b>${text}</div>` }
 ;(async () => {
   let shop = null
   try { shop = (await call({ v })).shop } catch { /* offline: handled below */ }
-  if (!shop) { $('shop').textContent = 'Redeem a free coffee'; $('sub').hidden = true; $('nolink').hidden = false; return }
+  if (!shop) { $('shop').textContent = 'Redeem a TrailSafe coffee'; $('sub').hidden = true; $('nolink').hidden = false; return }
   $('shop').textContent = shop
-  document.title = shop + ' · Redeem a free coffee'
+  document.title = shop + ' · Redeem a TrailSafe coffee'
   $('form').hidden = false
   const go = async () => {
     const code = $('code').value.replace(/\D/g, '')
     if (code.length !== 5) return show('bad', 'Enter the 5 digits', 'The member’s code has 5 digits.')
     $('go').disabled = true
     try {
-      const { result } = await call({ v, code })
-      if (result === 'ok') { show('ok', '✓ Coffee confirmed', 'One free coffee for a TrailSafe member. Thank you for supporting the trails.'); $('code').value = '' }
+      const { result, name, sponsor } = await call({ v, code })
+      if (result === 'ok') { const line = 'One coffee at cost' + (name ? ' for ' + esc(name) : '') + (sponsor ? ', sponsored by ' + esc(sponsor) : ''); show('ok', '✓ Coffee confirmed', line.endsWith('.') ? line : line + '.'); $('code').value = '' }
       else if (result === 'wait') show('bad', 'Please wait a minute', 'Too many wrong codes in a row. Try again in a minute.')
       else show('bad', 'That code isn’t valid', 'It may have expired or been used. Ask the member to get a new one.')
     } catch { show('bad', 'No connection', 'Check your signal and try again.') }
