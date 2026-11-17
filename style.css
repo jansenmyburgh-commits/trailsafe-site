@@ -98,6 +98,8 @@ footer { border-top: 1px solid var(--forest-2); }
 footer .logo { display: block; height: 35px; width: auto; margin-bottom: 12px; }
 footer nav { display: flex; flex-wrap: wrap; gap: 8px 22px; }
 footer .copy { margin: 22px 0 0; color: var(--sage); }
+footer .adm { margin-left: 12px; padding: 10px 6px; font-size: 0.8rem; color: var(--sage); opacity: 0.55; text-decoration: none; }
+footer .adm:hover, footer .adm:focus-visible { opacity: 1; text-decoration: underline; }
 
 @media (min-width: 860px) {
   .menu-toggle, .burger { display: none; }
