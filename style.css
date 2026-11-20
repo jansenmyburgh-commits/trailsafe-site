@@ -66,6 +66,12 @@ html { scroll-behavior: smooth; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 20px; margin-top: 30px; }
 .btn-light { display: inline-block; padding: 15px 28px; border-radius: 14px; background: var(--cream); color: var(--forest); font-weight: 700; font-size: 1.1rem; text-decoration: none; }
 .btn-light:hover, .btn-light:focus { background: #fff; }
+.badge { display: inline-block; line-height: 0; }
+.badge img { display: block; width: auto; }
+.badge.apple img { height: 52px; }
+/* Google's badge file carries its own clear space; the negative margin cancels it so both badges look the same height */
+.badge.google img { height: 78px; margin: -13px; }
+.badge:focus-visible { outline: 2px solid var(--sage); outline-offset: 4px; border-radius: 10px; }
 .soon { color: var(--sage); font-size: 0.95rem; }
 .btn-off { display: inline-block; padding: 13px 24px; border: 1.5px solid var(--sage); border-radius: 14px; color: var(--cream); font-weight: 600; }
 .free { margin: 18px 0 0; color: var(--sage); font-size: 0.95rem; }
