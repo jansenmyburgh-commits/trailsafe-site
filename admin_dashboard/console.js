@@ -31,13 +31,14 @@ async function api(action, args = {}) {
   return j
 }
 const say = (e) => ({ sign_in: 'Please sign in again.', two_step: 'The authenticator code is needed.', not_owner: 'This account is not the owner account.',
-  'unknown community': 'There’s no sponsor sheet for a demo or test community — only a real one.' }[e.message] || e.message)
+  'unknown community': 'There’s no sponsor sheet for a demo or test community — only a real one.',
+  already_handled: 'Already handled — someone decided on this request first.' }[e.message] || e.message)
 
 // ---------- confirm box (wf-14: every change names who and what, and says it is recorded) ----------
-function confirmBox({ title, text, verb, danger = false }) {
+function confirmBox({ title, text, verb, danger = false, extra = '' }) {
   return new Promise((ok) => {
     const m = $('#modal')
-    m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><p>${esc(text)}</p><p class="muted">This is recorded in the audit trail.</p>
+    m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><p>${esc(text)}</p>${extra}<p class="muted">This is recorded in the audit trail.</p>
       <div class="row"><button class="btn ${danger ? 'warn' : 'go'}" id="yes">${esc(verb)}</button><button class="btn" id="no">Cancel</button></div></div>`
     m.hidden = false
     const done = (v) => { m.hidden = true; m.innerHTML = ''; ok(v) }
@@ -156,6 +157,7 @@ function route() {
     if (p === 'community' && a === 'new') return viewCreate(q.get('from'))
     if (p === 'community' && b === 'edit') return viewEdit(a)
     if (p === 'community' && b === 'sponsor') return viewSponsorSheet(a)
+    if (p === 'community' && b === 'waiting') return viewWaiting(a)
     if (p === 'community') return viewCommunity(a)
     if (p === 'people') return viewPeople()
     if (p === 'requests') return viewRequests()
@@ -246,9 +248,65 @@ async function viewCommunities() {
     <table><tr><th>Name</th><th>Members</th><th>Admins</th><th>Waiting to join</th><th>Codes out</th><th></th></tr>
     ${data.map((c) => { const days = c.oldest_request_age_s == null ? null : Math.floor(c.oldest_request_age_s / 86400)
       return `<tr><td><b>${esc(c.name)}</b></td><td><a href="#/community/${c.community_id}">${c.members}</a></td><td>${c.admins}</td>
-        <td>${c.waiting}${days != null ? ` · <span class="${days > 7 ? 'red' : 'muted'}">oldest ${days} day${days === 1 ? '' : 's'}</span>` : ''}</td><td>${c.codes_out}</td>
+        <td>${c.waiting ? `<a href="#/community/${c.community_id}/waiting">${c.waiting}</a>` : 0}${days != null ? ` · <span class="${days > 7 ? 'red' : 'muted'}">oldest ${days} day${days === 1 ? '' : 's'}</span>` : ''}</td><td>${c.codes_out}</td>
         <td><a href="#/community/${c.community_id}/edit">Edit</a></td></tr>` }).join('') || '<tr><td colspan="6" class="muted">No communities yet.</td></tr>'}</table>
-    <p class="hint">Click a member count to see who is in the community. A waiting request older than 7 days shows in red.</p>`)
+    <p class="hint">Click a member count to see who is in the community, or a waiting count to work through who is waiting. A waiting request older than 7 days shows in red.</p>`)
+}
+
+// ---- T–W (OWNER-APPROVE-1, signed off 23 Nov 2026): who is waiting to join one community. The owner approves with a community join code,
+// lets them in at once (no code; they get "You’re in … TrailSafe approved your request, so no join code is needed"), or ignores. Admins are not told.
+const shortName = (full) => { const p = String(full || '').trim().split(/\s+/); return p.length > 1 ? `${p[0]} ${p[p.length - 1][0].toUpperCase()}.` : p[0] }
+const fourFour = (code) => `${code.slice(0, 4)} ${code.slice(4)}`
+const daysAgo = (iso) => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
+const agoText = (d) => (d < 1 ? 'Today' : d === 1 ? '1 day ago' : `${d} days ago`)
+async function viewWaiting(id) {
+  const [{ data: info }, { data: rows }] = await Promise.all([api('community_info', { community: id }), api('waiting', { community: id })])
+  if (!info) return toast('Unknown community.')
+  const list = rows || []
+  shell('communities', `<p><a href="#/communities">‹ Communities</a></p><h1>${esc(info.name)} — ${list.length} waiting to join</h1>
+    <p class="hint">Normally the community’s admin approves people in the app. Approve here to help a new community get going.</p>
+    ${list.length ? `<table><tr><th>Name</th><th>Activity</th><th>Email</th><th>Asked</th></tr>
+    ${list.map((r, i) => { const d = daysAgo(r.requested_at)
+      return `<tr class="pair"><td><b>${esc(r.full_name)}</b>${r.moving_from ? `<br><span class="pill new">Moving from ${esc(r.moving_from)}</span>` : ''}</td><td>${esc(r.activity || '')}</td><td>${esc(r.email || '')}</td><td class="${d > 7 ? 'red' : ''}">${agoText(d)}</td></tr>
+      <tr><td colspan="4"><div class="row">${r.moving_from ? '' : `<button class="btn small go" data-ap="${i}">Approve and send code</button>`}<button class="btn small" data-in="${i}">Let them in now</button><button class="btn small warn" data-ig="${i}">Ignore</button></div></td></tr>` }).join('')}</table>
+    <p class="hint">Oldest first. Someone moving from another community needs no code, so they get Let them in now and Ignore only.</p>` : '<p class="muted" style="margin-top:16px">Nobody is waiting.</p>'}`)
+  document.querySelectorAll('[data-ap]').forEach((b) => (b.onclick = () => guard(async () => {
+    const r = list[b.dataset.ap]
+    const { data: code } = await api('approve', { community: id, user: r.user_id })
+    await codeBox(r, info.name, code); viewWaiting(id)
+  })))
+  document.querySelectorAll('[data-in]').forEach((b) => (b.onclick = () => guard(async () => {
+    const r = list[b.dataset.in], who = shortName(r.full_name)
+    const ok = await confirmBox(r.moving_from
+      ? { title: `Let ${who} into ${info.name} now?`, text: `They leave ${r.moving_from} and join ${info.name} straight away, with no community join code, and get a notification: “You’re in ${info.name}”.`, verb: 'Let them in now' }
+      : { title: `Let ${who} into ${info.name} now?`, text: 'They join straight away as a member, with no community join code, and get a notification:', verb: 'Let them in now',
+          extra: `<div class="note"><b>You’re in ${esc(info.name)}</b><br><span class="muted">TrailSafe approved your request, so no join code is needed. Tap to get started.</span></div>` })
+    if (!ok) return
+    await api('let_in', { community: id, user: r.user_id }); toast(`${who} is now in ${info.name}.`); viewWaiting(id)
+  })))
+  document.querySelectorAll('[data-ig]').forEach((b) => (b.onclick = () => guard(async () => {
+    const r = list[b.dataset.ig]
+    if (!(await confirmBox({ title: `Ignore ${shortName(r.full_name)}?`, text: 'They can ask again.', verb: 'Ignore', danger: true }))) return
+    await api('ignore_request', { community: id, user: r.user_id }); toast('Ignored.'); viewWaiting(id)
+  })))
+}
+// U: the code, with Copy, WhatsApp (WhatsApp Web, the S-85 message; you choose the contact) and Email (to their address). Resolves on Done.
+function codeBox(r, community, code) {
+  return new Promise((ok) => {
+    const first = String(r.full_name || '').trim().split(/\s+/)[0]
+    const msg = `TrailSafe community join code for ${shortName(r.full_name)}: ${fourFour(code)}\n\nOpen the app and enter it to join ${community}.`
+    const wa = `https://wa.me/?text=${encodeURIComponent(msg)}`
+    const mail = `mailto:${encodeURIComponent(r.email || '')}?subject=${encodeURIComponent('Your TrailSafe community join code')}&body=${encodeURIComponent(msg)}`
+    const m = $('#modal')
+    m.innerHTML = `<div class="box"><p class="eyebrow">${esc(r.full_name)} approved</p><h2>One last step</h2>
+      <div class="codebox"><span>${fourFour(code)}</span><button class="btn small" id="cp">Copy</button></div>
+      <p>Send this code to ${esc(first)}. The message is ready:</p><p class="note" style="white-space:pre-line">${esc(msg)}</p>
+      <div class="row"><a class="btn go" href="${wa}" target="_blank" rel="noopener">WhatsApp</a><a class="btn" href="${mail}">Email</a><button class="btn" id="dn">Done</button></div>
+      <p class="muted">WhatsApp opens WhatsApp Web with the message; you choose the contact. Email opens your mail program, addressed to ${esc(r.email || 'them')}. This is recorded in the audit trail.</p></div>`
+    m.hidden = false
+    $('#cp').onclick = () => { navigator.clipboard?.writeText(fourFour(code)).then(() => toast('Code copied.'), () => toast('Copy did not work — select the code instead.')) }
+    $('#dn').onclick = () => { m.hidden = true; m.innerHTML = ''; ok() }
+  })
 }
 
 // ---- D: who is in a community ----
