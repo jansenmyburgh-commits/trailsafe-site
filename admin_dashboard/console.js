@@ -256,7 +256,7 @@ async function viewCommunities() {
 // ---- T–W (OWNER-APPROVE-1, signed off 23 Nov 2026): who is waiting to join one community. The owner approves with a community join code,
 // lets them in at once (no code; they get "You’re in … TrailSafe approved your request, so no join code is needed"), or ignores. Admins are not told.
 const shortName = (full) => { const p = String(full || '').trim().split(/\s+/); return p.length > 1 ? `${p[0]} ${p[p.length - 1][0].toUpperCase()}.` : p[0] }
-const fourFour = (code) => `${code.slice(0, 4)} ${code.slice(4)}`
+const shownCode = (code) => code.slice(0, 4)                 // CODE-4 (owner, 23 Nov 2026): people see and type the first 4 characters
 const daysAgo = (iso) => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
 const agoText = (d) => (d < 1 ? 'Today' : d === 1 ? '1 day ago' : `${d} days ago`)
 async function viewWaiting(id) {
@@ -294,17 +294,17 @@ async function viewWaiting(id) {
 function codeBox(r, community, code) {
   return new Promise((ok) => {
     const first = String(r.full_name || '').trim().split(/\s+/)[0]
-    const msg = `TrailSafe community join code for ${shortName(r.full_name)}: ${fourFour(code)}\n\nOpen the app and enter it to join ${community}.`
+    const msg = `TrailSafe community join code for ${shortName(r.full_name)}\n\n${shownCode(code)}\n\nOpen the app and enter it to join ${community}.`
     const wa = `https://wa.me/?text=${encodeURIComponent(msg)}`
     const mail = `mailto:${encodeURIComponent(r.email || '')}?subject=${encodeURIComponent('Your TrailSafe community join code')}&body=${encodeURIComponent(msg)}`
     const m = $('#modal')
     m.innerHTML = `<div class="box"><p class="eyebrow">${esc(r.full_name)} approved</p><h2>One last step</h2>
-      <div class="codebox"><span>${fourFour(code)}</span><button class="btn small" id="cp">Copy</button></div>
+      <div class="codebox"><span>${shownCode(code)}</span><button class="btn small" id="cp">Copy</button></div>
       <p>Send this code to ${esc(first)}. The message is ready:</p><p class="note" style="white-space:pre-line">${esc(msg)}</p>
       <div class="row"><a class="btn go" href="${wa}" target="_blank" rel="noopener">WhatsApp</a><a class="btn" href="${mail}">Email</a><button class="btn" id="dn">Done</button></div>
       <p class="muted">WhatsApp opens WhatsApp Web with the message; you choose the contact. Email opens your mail program, addressed to ${esc(r.email || 'them')}. This is recorded in the audit trail.</p></div>`
     m.hidden = false
-    $('#cp').onclick = () => { navigator.clipboard?.writeText(fourFour(code)).then(() => toast('Code copied.'), () => toast('Copy did not work — select the code instead.')) }
+    $('#cp').onclick = () => { navigator.clipboard?.writeText(shownCode(code)).then(() => toast('Code copied.'), () => toast('Copy did not work — select the code instead.')) }
     $('#dn').onclick = () => { m.hidden = true; m.innerHTML = ''; ok() }
   })
 }
