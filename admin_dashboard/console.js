@@ -1,11 +1,11 @@
-// TrailSafe owner console (wf-14). One page: signs the owner in (email code, then an authenticator code) and talks to the owner-api server
-// function with that sign-in. Nothing secret is in this file: the database's master key lives only on the server.
+// TrailSafe owner console (wf-14). One page: signs the owner in (Touch ID, wf-34; or the email code, then an authenticator code) and talks
+// to the owner-api server function with that sign-in. Nothing secret is in this file: the database's master key lives only on the server.
 // Never inside another site's page (GitHub Pages cannot send the X-Frame-Options header, so the page checks for itself).
 if (window.top !== window.self) window.top.location = window.location
 const SUPABASE_URL = 'https://qpezqayqbghujlwjgemu.supabase.co'
 const SUPABASE_KEY = 'sb_publishable_sbcMyfC8UcLTJ0g-i2vduw_RGy7CiEp'
 // The sign-in lives in sessionStorage: it dies with the tab, so no computer keeps a standing owner session (members' phones keep theirs, SE-1).
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, storageKey: 'trailsafe-owner', storage: window.sessionStorage } })
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, storageKey: 'trailsafe-owner', storage: window.sessionStorage, experimental: { passkey: true } } })
 try { localStorage.removeItem('trailsafe-owner') } catch { /* an older visit's session, no longer used */ }
 
 const TURNSTILE_SITE_KEY = '0x4AAAAAAFvFaEQHEPuX1Iu7'   // public by design
@@ -31,6 +31,7 @@ async function api(action, args = {}) {
   return j
 }
 const say = (e) => ({ sign_in: 'Please sign in again.', two_step: 'The authenticator code is needed.', not_owner: 'This account is not the owner account.',
+  touch_off: 'Touch ID sign-in is off.',
   'unknown community': 'There’s no sponsor sheet for a demo or test community — only a real one.',
   already_handled: 'Already handled — someone decided on this request first.' }[e.message] || e.message)
 
@@ -50,10 +51,10 @@ function confirmBox({ title, text, verb, danger = false, extra = '' }) {
 // ---------- the bot check (Cloudflare Turnstile): Supabase now asks for it when an email code is requested ----------
 let captchaLoad = null
 // The box appears right under the sign-in button (a slot with room), never off in a corner (owner, 2 Nov 2026).
-function captchaToken() {
+function captchaToken(slotSel = '#cap') {
   captchaLoad = captchaLoad || new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; s.onload = ok; s.onerror = no; document.head.appendChild(s) })
   return captchaLoad.then(() => new Promise((ok, no) => {
-    const slot = document.querySelector('#cap')
+    const slot = document.querySelector(slotSel)
     const box = slot ? slot.querySelector('[data-widget]') : document.body.appendChild(Object.assign(document.createElement('div'), { style: 'position:fixed;left:0;right:0;bottom:24px;display:flex;justify-content:center;z-index:60' }))
     const hint = slot ? slot.querySelector('[data-hint]') : null
     box.style.minHeight = '65px'
@@ -70,9 +71,23 @@ function captchaToken() {
 function loginShell(inner) {
   $('#app').innerHTML = `<div class="login"><h1>TrailSafe owner console</h1><div class="panel">${inner}</div></div>`
 }
-function showEmailStep(msg = '') {
-  loginShell(`<p>Sign in with the owner email. We send a 6-digit code to it.</p><label for="em">Email</label><input id="em" type="email" autocomplete="username" autofocus>
-    <div class="row" style="margin-top:14px"><button class="btn go" id="send">Send code</button></div><div id="cap" style="margin-top:10px;text-align:center"><p data-hint hidden style="font-weight:600"></p><div data-widget style="display:flex;justify-content:center"></div></div><div class="err" id="e">${esc(msg)}</div>`)
+// wf-34: B (Touch ID first, the email step underneath as the backup), C (Touch ID didn't finish: the error line), D (Touch ID switched off).
+const capSlot = (id) => `<div id="${id}" style="margin-top:10px;text-align:center"><p data-hint hidden style="font-weight:600"></p><div data-widget style="display:flex;justify-content:center"></div></div>`
+function showEmailStep(msg = '', mode = 'touch') {
+  const touch = mode === 'touch' && !!window.PublicKeyCredential
+  const top = mode === 'off'
+    ? `<div class="badmsg">Touch ID sign-in is off.</div><p style="margin-top:10px">A Touch ID key that wasn’t added from this console was found on the owner account, so no Touch ID key is accepted. Sign in with the email code and your authenticator, then remove the key you don’t recognise under Touch ID. We’ve emailed you.</p></div><div class="panel">`
+    : touch ? `<p>Sign in with Touch ID on this Mac.</p><div class="row" style="margin-top:14px"><button class="btn go" id="touch">Sign in with Touch ID</button></div>${capSlot('tcap')}<div class="err" id="te"></div></div><div class="panel">` : ''
+  loginShell(`${top}<p>${touch ? 'Or sign in with the email code and your authenticator app.' : 'Sign in with the owner email. We send a 6-digit code to it.'}</p><label for="em">Email</label><input id="em" type="email" autocomplete="username"${touch ? '' : ' autofocus'}>
+    <div class="row" style="margin-top:14px"><button class="btn${touch ? '' : ' go'}" id="send">Send code</button></div>${capSlot('cap')}<div class="err" id="e">${esc(msg)}</div>`)
+  if (touch) $('#touch').onclick = async () => {
+    $('#touch').disabled = true; $('#te').textContent = ''
+    const didnt = () => { $('#te').textContent = 'Touch ID sign-in didn’t finish. Try again, or use the email code below.'; $('#touch').disabled = false }
+    let t; try { t = await captchaToken('#tcap') } catch { $('#te').textContent = 'The bot check did not pass. If you use a VPN, switch it off for a moment and try again.'; $('#touch').disabled = false; return }
+    const { error } = await sb.auth.signInWithPasskey({ options: { captchaToken: t } })
+    if (error) return didnt()
+    start()
+  }
   $('#send').onclick = async () => {
     const email = $('#em').value.trim().toLowerCase()
     if (!email) return
@@ -121,14 +136,21 @@ async function showAuthenticatorStep() {
   }
 }
 
+// A Touch ID (passkey) sign-in: the token lists how the person signed in (amr). The server makes the real decision (owner-api).
+function viaTouch(session) {
+  try { const c = JSON.parse(atob(session.access_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return (c.amr || []).some((m) => /passkey|webauthn/i.test(String(m.method ?? m))) } catch { return false }
+}
+
 // ---------- the console ----------
 let me = null, counts = { requests: 0, feedback: 0, problems: 0 }
 async function start() {
   const { data: s } = await sb.auth.getSession()
   if (!s.session) return showEmailStep()
-  const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel()
-  if (aal?.currentLevel !== 'aal2') return showAuthenticatorStep()
-  try { me = (await api('whoami')).email } catch (e) { await sb.auth.signOut(); return showEmailStep(say(e)) }
+  if (!viaTouch(s.session)) {
+    const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel()
+    if (aal?.currentLevel !== 'aal2') return showAuthenticatorStep()
+  }
+  try { me = (await api('whoami')).email } catch (e) { await sb.auth.signOut(); return e.message === 'touch_off' ? showEmailStep('', 'off') : showEmailStep(say(e)) }
   route()
 }
 async function refreshCounts() {
@@ -137,7 +159,7 @@ async function refreshCounts() {
     counts = { requests: r.data.filter((x) => x.status === 'new').length, feedback: f.data.filter((x) => x.status === 'new').length, problems: pr.data.filter((x) => x.status === 'new').length }
   } catch { /* the counts are a nicety */ }
 }
-const NAV = [['communities', 'Communities'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee']]
+const NAV = [['communities', 'Communities'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee'], ['touch-id', 'Touch ID']]
 function shell(active, inner) {
   const badge = (k) => (k === 'requests' && counts.requests ? `<span class="count">${counts.requests}</span>` : k === 'feedback' && counts.feedback ? `<span class="count">${counts.feedback}</span>` : k === 'problems' && counts.problems ? `<span class="count">${counts.problems}</span>` : '')
   $('#app').innerHTML = `<div class="layout"><nav><div class="brand">TrailSafe</div><div class="sub">Owner console</div>
@@ -145,7 +167,7 @@ function shell(active, inner) {
     <div class="who">${esc(me)}<br><button id="signout">Sign out</button></div></nav><main>${inner}</main></div>`
   $('#signout').onclick = async () => { await sb.auth.signOut(); showEmailStep() }
 }
-async function guard(fn) { try { await fn() } catch (e) { if (['sign_in', 'two_step'].includes(e.message)) return start(); toast(say(e)) } }
+async function guard(fn) { try { await fn() } catch (e) { if (['sign_in', 'two_step', 'touch_off'].includes(e.message)) return start(); toast(say(e)) } }
 
 window.addEventListener('hashchange', () => me && route())
 function route() {
@@ -170,6 +192,7 @@ function route() {
     if (p === 'audit') return viewAudit()
     if (p === 'trail-areas') return viewTrailAreas(a)
     if (p === 'coffee') return viewCoffee()
+    if (p === 'touch-id') return viewTouchId()
     return viewCommunities()
   })
 }
@@ -686,3 +709,45 @@ async function viewTrailAreas(regionId) {
 }
 
 start()
+
+
+// ---- wf-34 E to H: Touch ID keys (CONSOLE-TOUCHID-1) ----
+async function viewTouchId(done = '') {
+  const { data: keys } = await api('touch_keys')
+  const rows = (keys || []).map((k) => `<tr><td><b>${esc(k.name)}</b>${k.approved ? '' : ' <span class="pill new">Not added from here</span>'}</td><td>${esc(when(k.created_at))}</td><td>${k.last_used_at ? esc(when(k.last_used_at)) : 'Not yet'}</td><td><button class="btn small warn" data-rm="${esc(k.id)}" data-name="${esc(k.name)}" data-at="${esc(when(k.created_at))}">Remove</button></td></tr>`).join('')
+  shell('touch-id', `<h1>Touch ID</h1><p class="hint">Sign in to this console with your fingerprint instead of the two codes. The email code and authenticator always work too, as the backup.</p>
+    ${done ? `<p class="okmsg">${esc(done)}</p>` : ''}
+    <table><tr><th>Touch ID key</th><th>Added</th><th>Last used</th><th></th></tr>${rows || '<tr><td colspan="4" class="muted">No Touch ID keys yet.</td></tr>'}</table>
+    <div class="row" style="margin-top:14px"><button class="btn${keys && keys.length ? '' : ' go'}" id="addkey">Add Touch ID on ${keys && keys.length ? 'another' : 'this'} computer</button></div>`)
+  $('#addkey').onclick = () => guard(addTouchId)
+  document.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = () => guard(async () => {
+    const yes = await confirmBox({ title: 'Remove this Touch ID key?', text: `${b.dataset.name}, added ${b.dataset.at}. It will no longer sign you in. You can add it again later.`, verb: 'Remove', danger: true })
+    if (!yes) return
+    await api('touch_remove', { id: b.dataset.rm })
+    viewTouchId('Removed.')
+  })))
+}
+// F: the authenticator code again, then the Mac's fingerprint window. The server opens a 3-minute add window only after a fresh code.
+async function addTouchId() {
+  const { data: f } = await sb.auth.mfa.listFactors()
+  const factor = (f?.totp ?? []).find((x) => x.status === 'verified')
+  if (!factor) return toast('Set up the authenticator first: sign out and sign in with the email code.')
+  const m = $('#modal')
+  m.innerHTML = `<div class="box"><h2>Add Touch ID</h2><p>To add a Touch ID key, enter the 6-digit code from your authenticator app first. Your Mac then asks for your fingerprint.</p>
+    <label for="tc">Authenticator code</label><input id="tc" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code"><div class="err" id="me"></div>
+    <p class="muted">This is recorded in the audit trail.</p><div class="row"><button class="btn go" id="yes">Continue</button><button class="btn" id="no">Cancel</button></div></div>`
+  m.hidden = false; $('#tc').focus()
+  const close = () => { m.hidden = true; m.innerHTML = '' }
+  $('#no').onclick = close
+  $('#yes').onclick = async () => {
+    $('#yes').disabled = true; $('#me').textContent = ''
+    const fail = (t) => { $('#me').textContent = t; $('#yes').disabled = false }
+    const { error: e1 } = await sb.auth.mfa.challengeAndVerify({ factorId: factor.id, code: $('#tc').value.trim() })
+    if (e1) return fail('That code did not work. Try again.')
+    try { await api('touch_open') } catch (e) { return fail(say(e)) }
+    const { error: e2 } = await sb.auth.registerPasskey()
+    if (e2) return fail(/exists/i.test(String(e2.code || e2.message)) ? 'This computer already has a Touch ID key for the console.' : 'Touch ID wasn’t added. Try again.')
+    close()
+    viewTouchId('Touch ID added. Next time, sign in with Touch ID.')
+  }
+}
