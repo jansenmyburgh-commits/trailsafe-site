@@ -12,6 +12,10 @@ const TURNSTILE_SITE_KEY = '0x4AAAAAAFvFaEQHEPuX1Iu7'   // public by design
 const $ = (s) => document.querySelector(s)
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const when = (iso) => { if (!iso) return ''; const d = new Date(iso); return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) }
+// wf-35 (NAMES-MOBILE-1): +27825550142 shown as 082 555 0142; WhatsApp and mail links with a ready message from the owner.
+const localMobile = (m) => (m && /^\+27\d{9}$/.test(m) ? '0' + m.slice(3, 5) + ' ' + m.slice(5, 8) + ' ' + m.slice(8) : '')
+const waLink = (m, text) => `https://wa.me/${String(m).replace(/\D/g, '')}?text=${encodeURIComponent(text)}`
+const hiddenEmail = (e) => /privaterelay\.appleid\.com$/i.test(e || '')
 const slugOf = (n) => n.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
 
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), 3500) }
@@ -288,10 +292,12 @@ async function viewWaiting(id) {
   const list = rows || []
   shell('communities', `<p><a href="#/communities">‹ Communities</a></p><h1>${esc(info.name)} — ${list.length} waiting to join</h1>
     <p class="hint">Normally the community’s admin approves people in the app. Approve here to help a new community get going.</p>
-    ${list.length ? `<table><tr><th>Name</th><th>Activity</th><th>Email</th><th>Asked</th></tr>
+    ${list.length ? `<table><tr><th>Name</th><th>Activity</th><th>Mobile</th><th>Email</th><th>Asked</th></tr>
     ${list.map((r, i) => { const d = daysAgo(r.requested_at)
-      return `<tr class="pair"><td><b>${esc(r.full_name)}</b>${r.moving_from ? `<br><span class="pill new">Moving from ${esc(r.moving_from)}</span>` : ''}</td><td>${esc(r.activity || '')}</td><td>${esc(r.email || '')}</td><td class="${d > 7 ? 'red' : ''}">${agoText(d)}</td></tr>
-      <tr><td colspan="4"><div class="row">${r.moving_from ? '' : `<button class="btn small go" data-ap="${i}">Approve and send code</button>`}<button class="btn small" data-in="${i}">Let them in now</button><button class="btn small warn" data-ig="${i}">Ignore</button></div></td></tr>` }).join('')}</table>
+      const ask = `Hi ${shortName(r.full_name).split(' ')[0]}, this is Jansen from TrailSafe, about your request to join ${info.name}. Before we approve you, could you tell us `
+      const mail = r.email && !hiddenEmail(r.email) ? `mailto:${r.email}?subject=${encodeURIComponent(`Your request to join ${info.name} on TrailSafe`)}&body=${encodeURIComponent(ask)}` : ''
+      return `<tr class="pair"><td><b>${esc(r.full_name)}</b>${r.moving_from ? `<br><span class="pill new">Moving from ${esc(r.moving_from)}</span>` : ''}${r.note ? `<br><span class="muted">“${esc(r.note)}”</span>` : ''}</td><td>${esc(r.activity || '')}</td><td>${r.mobile ? esc(localMobile(r.mobile)) : '<span class="muted">None (before 1.0.7)</span>'}</td><td>${esc(r.email || '')}</td><td class="${d > 7 ? 'red' : ''}">${agoText(d)}</td></tr>
+      <tr><td colspan="5"><div class="row">${r.moving_from ? '' : `<button class="btn small go" data-ap="${i}">Approve and send code</button>`}<button class="btn small" data-in="${i}">Let them in now</button><button class="btn small warn" data-ig="${i}">Ignore</button>${r.mobile || mail ? '<span style="width:14px"></span>' : ''}${r.mobile ? `<a class="btn small" target="_blank" rel="noopener" href="${esc(waLink(r.mobile, ask))}">Ask on WhatsApp</a>` : ''}${mail ? `<a class="btn small" href="${esc(mail)}">Email</a>` : ''}</div></td></tr>` }).join('')}</table>
     <p class="hint">Oldest first. Someone moving from another community needs no code, so they get Let them in now and Ignore only.</p>` : '<p class="muted" style="margin-top:16px">Nobody is waiting.</p>'}`)
   document.querySelectorAll('[data-ap]').forEach((b) => (b.onclick = () => guard(async () => {
     const r = list[b.dataset.ap]
@@ -534,9 +540,10 @@ async function viewRequest(id) {
   const { data } = await api('group_requests'); const r = data.find((x) => x.id === id)
   if (!r) return toast('Unknown request.')
   if (r.status === 'new') { await api('set_group_request_status', { id, status: 'read' }); r.status = 'read'; counts.requests = Math.max(0, counts.requests - 1) }
-  shell('requests', `<p><a href="#/requests">‹ Group requests</a></p><h1>${esc(r.group_name)}</h1><p class="hint">Asked by ${esc(r.asker_name || 'a former member')}${r.asker_email ? ' · ' + esc(r.asker_email) : ''} · ${when(r.created_at)} · ${pill(r.status)}</p>
+  shell('requests', `<p><a href="#/requests">‹ Group requests</a></p><h1>${esc(r.group_name)}</h1><p class="hint">Asked by ${esc(r.asker_name || 'a former member')}${r.asker_mobile ? ' · ' + esc(localMobile(r.asker_mobile)) : ''}${r.asker_email ? ' · ' + esc(r.asker_email) : ''} · ${when(r.created_at)} · ${pill(r.status)}</p>
     <div class="panel"><label>Where do they run, hike or ride?</label><p>${esc(r.where_text)}</p><label>How we can verify the group</label><p>${esc(r.how_to_verify)}</p>
-    <div class="row" style="margin-top:18px">${r.status === 'done' ? '<span class="muted">A community was created from this request.</span>' : `<a class="btn go" href="#/community/new?from=${id}" style="text-decoration:none">Create community</a>`}<a class="btn" href="#/requests" style="text-decoration:none">Back</a></div></div>`)
+    ${r.is_admin === true ? '<label>Is the person the group’s admin?</label><p>Yes</p>' : r.is_admin === false ? `<label>Is the person the group’s admin?</label><p>No. The admin is <b>${esc(r.admin_name || '')}</b>${r.admin_mobile ? ', ' + esc(localMobile(r.admin_mobile)) : ''}</p>` : ''}
+    <div class="row" style="margin-top:18px">${r.status === 'done' ? '<span class="muted">A community was created from this request.</span>' : `<a class="btn go" href="#/community/new?from=${id}" style="text-decoration:none">Create community</a>`}<a class="btn" href="#/requests" style="text-decoration:none">Back</a>${r.asker_mobile || r.admin_mobile ? '<span style="width:14px"></span>' : ''}${r.asker_mobile ? `<a class="btn" target="_blank" rel="noopener" style="text-decoration:none" href="${esc(waLink(r.asker_mobile, `Hi ${String(r.asker_name || '').split(' ')[0]}, this is Jansen from TrailSafe, about your request to add ${r.group_name}. `))}">WhatsApp ${esc(String(r.asker_name || 'them').split(' ')[0])}</a>` : ''}${r.admin_mobile ? `<a class="btn" target="_blank" rel="noopener" style="text-decoration:none" href="${esc(waLink(r.admin_mobile, `Hi ${String(r.admin_name || '').split(' ')[0]}, this is Jansen from TrailSafe. Someone asked us to add ${r.group_name}, and said you are the group’s admin. `))}">WhatsApp the admin</a>` : ''}</div></div>`)
 }
 
 // ---- Problems the app found by itself (PROBLEMS-1): one row per kind of failure, with how often it happened ----
