@@ -163,7 +163,7 @@ async function refreshCounts() {
     counts = { requests: r.data.filter((x) => x.status === 'new').length, feedback: f.data.filter((x) => x.status === 'new').length, problems: pr.data.filter((x) => x.status === 'new').length }
   } catch { /* the counts are a nicety */ }
 }
-const NAV = [['communities', 'Communities'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee'], ['touch-id', 'Touch ID']]
+const NAV = [['communities', 'Communities'], ['out-now', 'Out now'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee'], ['touch-id', 'Touch ID']]
 function shell(active, inner) {
   const badge = (k) => (k === 'requests' && counts.requests ? `<span class="count">${counts.requests}</span>` : k === 'feedback' && counts.feedback ? `<span class="count">${counts.feedback}</span>` : k === 'problems' && counts.problems ? `<span class="count">${counts.problems}</span>` : '')
   $('#app').innerHTML = `<div class="layout"><nav><div class="brand">TrailSafe</div><div class="sub">Owner console</div>
@@ -185,6 +185,7 @@ function route() {
     if (p === 'community' && b === 'sponsor') return viewSponsorSheet(a)
     if (p === 'community' && b === 'waiting') return viewWaiting(a)
     if (p === 'community') return viewCommunity(a)
+    if (p === 'out-now') return viewOutNow(a)
     if (p === 'people') return viewPeople()
     if (p === 'requests') return viewRequests()
     if (p === 'request') return viewRequest(a)
@@ -647,6 +648,46 @@ const TRAIL_STYLE = (url) => ({
     { id: 'places', type: 'symbol', source: 'base', 'source-layer': 'places', filter: ['in', ['get', 'kind'], ['literal', ['locality', 'neighbourhood', 'macrohood']]], layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': 12 }, paint: { 'text-color': '#3A3F37', 'text-halo-color': '#F3F1EA', 'text-halo-width': 1.4 } },
   ],
 })
+// ---- wf-39 Out now (signed off 24 Nov 2026, "anonymous dots only"): everyone out right now as dots, per uploaded map. The server sends
+// positions only (no id, name, community or mode); hidden members are dots too. Refreshes every 30 seconds while the page is open.
+let outMap = null, outTimer = null
+async function viewOutNow(regionId) {
+  if (outMap) { outMap.remove(); outMap = null }
+  clearTimeout(outTimer)
+  const [{ data: maps }, { data: first }] = await Promise.all([api('trail_maps'), api('out_now')])
+  if (!maps.length) return shell('out-now', `<h1>Out now</h1><p class="hint">There is no uploaded map yet.</p>`)
+  if (!mapProtocol) { mapProtocol = new pmtiles.Protocol(); maplibregl.addProtocol('pmtiles', mapProtocol.tile) }
+  const heads = await Promise.all(maps.map(async (m) => { const f = new pmtiles.PMTiles(MAP_BUCKET + m.file); mapProtocol.add(f); try { return await f.getHeader() } catch { return null } }))
+  const inside = (h, p) => h && p.lng >= h.minLon && p.lng <= h.maxLon && p.lat >= h.minLat && p.lat <= h.maxLat
+  const i = Math.max(0, maps.findIndex((m) => m.id === regionId)), cur = maps[i], hdr = heads[i]
+  const side = (pts) => {
+    const elsewhere = pts.filter((p) => !heads.some((h) => inside(h, p))).length
+    const t = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    return `<h2>${pts.length} out now</h2>
+      ${maps.map((m, j) => `<a class="arow${j === i ? ' on' : ''}" href="#/out-now/${m.id}"><b>${esc(m.name)}</b><small>${pts.filter((p) => inside(heads[j], p)).length} out</small></a>`).join('')}
+      ${elsewhere ? `<div class="arow"><b>Not on a map yet</b><small>${elsewhere} out where there’s no uploaded map</small></div>` : ''}
+      <p class="muted">Updated ${t}. Refreshes every 30 seconds.</p>`
+  }
+  const fc = (pts) => ({ type: 'FeatureCollection', features: pts.map((p) => ({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: [p.lng, p.lat] } })) })
+  shell('out-now', `<h1>Out now</h1><p class="hint">Everyone out on the trails right now, as anonymous dots: no names, the same view a member has from home. Members who hide their location are dots too.</p>
+    <div class="ta"><div id="taside">${side(first)}</div><div id="tamap"></div></div>`)
+  const url = MAP_BUCKET + cur.file
+  const map = (outMap = new maplibregl.Map({ container: 'tamap', style: TRAIL_STYLE(url), center: hdr ? [(hdr.minLon + hdr.maxLon) / 2, (hdr.minLat + hdr.maxLat) / 2] : [22.46, -33.96], zoom: 10, attributionControl: { compact: true } }))
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+  map.on('load', () => {
+    const here = first.filter((p) => inside(hdr, p))   // zoom to where people are; the whole map when nobody is out on it
+    if (here.length) map.fitBounds([[Math.min(...here.map((p) => p.lng)), Math.min(...here.map((p) => p.lat))], [Math.max(...here.map((p) => p.lng)), Math.max(...here.map((p) => p.lat))]], { padding: 80, maxZoom: 13, animate: false })
+    else if (hdr) map.fitBounds([[hdr.minLon, hdr.minLat], [hdr.maxLon, hdr.maxLat]], { padding: 20, animate: false })
+    map.addSource('out', { type: 'geojson', data: fc(first) })
+    map.addLayer({ id: 'out-dots', type: 'circle', source: 'out', paint: { 'circle-radius': 6, 'circle-color': '#2b4c3a', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.5 } })
+  })
+  const tick = async () => {
+    if (outMap !== map || !document.getElementById('tamap') || !location.hash.startsWith('#/out-now')) { if (outMap === map) { map.remove(); outMap = null } return }
+    try { const { data: pts } = await api('out_now'); map.getSource('out')?.setData(fc(pts)); $('#taside').innerHTML = side(pts) } catch { /* try again next time */ }
+    outTimer = setTimeout(tick, 30000)
+  }
+  outTimer = setTimeout(tick, 30000)
+}
 const trailMsg = (e) => ({ small: 'That loop is too small, or it crosses itself. Try again.', crossing: 'That loop is too small, or it crosses itself. Try again.', shape: 'That loop can’t be used. Try again.', name: 'Please give the area a name.' }[e.message] || say(e))
 
 async function viewTrailAreas(regionId) {
