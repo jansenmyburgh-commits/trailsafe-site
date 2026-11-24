@@ -150,7 +150,7 @@ async function start() {
     const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel()
     if (aal?.currentLevel !== 'aal2') return showAuthenticatorStep()
   }
-  try { me = (await api('whoami')).email } catch (e) { await sb.auth.signOut(); return e.message === 'touch_off' ? showEmailStep('', 'off') : showEmailStep(say(e)) }
+  try { me = (await api('whoami')).email } catch (e) { await sb.auth.signOut({ scope: 'local' }); return e.message === 'touch_off' ? showEmailStep('', 'off') : showEmailStep(say(e)) }
   route()
 }
 async function refreshCounts() {
@@ -165,7 +165,7 @@ function shell(active, inner) {
   $('#app').innerHTML = `<div class="layout"><nav><div class="brand">TrailSafe</div><div class="sub">Owner console</div>
     ${NAV.map(([k, l]) => `<a href="#/${k}" class="${k === active ? 'on' : ''}">${l}${badge(k)}</a>`).join('')}
     <div class="who">${esc(me)}<br><button id="signout">Sign out</button></div></nav><main>${inner}</main></div>`
-  $('#signout').onclick = async () => { await sb.auth.signOut(); showEmailStep() }
+  $('#signout').onclick = async () => { await sb.auth.signOut({ scope: 'local' }); showEmailStep() }
 }
 async function guard(fn) { try { await fn() } catch (e) { if (['sign_in', 'two_step', 'touch_off'].includes(e.message)) return start(); toast(say(e)) } }
 
