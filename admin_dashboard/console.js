@@ -275,9 +275,9 @@ async function viewCommunities() {
     <table><tr><th>Name</th><th>Members</th><th>Admins</th><th>Waiting to join</th><th>Codes out</th><th></th></tr>
     ${data.map((c) => { const days = c.oldest_request_age_s == null ? null : Math.floor(c.oldest_request_age_s / 86400)
       return `<tr><td><b>${esc(c.name)}</b></td><td><a href="#/community/${c.community_id}">${c.members}</a></td><td>${c.admins}</td>
-        <td>${c.waiting ? `<a href="#/community/${c.community_id}/waiting">${c.waiting}</a>` : 0}${days != null ? ` · <span class="${days > 7 ? 'red' : 'muted'}">oldest ${days} day${days === 1 ? '' : 's'}</span>` : ''}</td><td>${c.codes_out}</td>
+        <td>${c.waiting ? `<a href="#/community/${c.community_id}/waiting">${c.waiting}</a>` : 0}${days != null ? ` · <span class="${days > 7 ? 'red' : 'muted'}">oldest ${days} day${days === 1 ? '' : 's'}</span>` : ''}</td><td>${c.codes_out ? `<a href="#/community/${c.community_id}/waiting">${c.codes_out}</a>` : 0}</td>
         <td><a href="#/community/${c.community_id}/edit">Edit</a></td></tr>` }).join('') || '<tr><td colspan="6" class="muted">No communities yet.</td></tr>'}</table>
-    <p class="hint">Click a member count to see who is in the community, or a waiting count to work through who is waiting. A waiting request older than 7 days shows in red.</p>`)
+    <p class="hint">Click a member count to see who is in the community, or a waiting count to work through who is waiting. Click a codes-out count to see who was approved but hasn’t joined yet. A waiting request older than 7 days shows in red.</p>`)
 }
 
 // ---- T–W (OWNER-APPROVE-1, signed off 23 Nov 2026): who is waiting to join one community. The owner approves with a community join code,
@@ -285,11 +285,14 @@ async function viewCommunities() {
 const shortName = (full) => { const p = String(full || '').trim().split(/\s+/); return p.length > 1 ? `${p[0]} ${p[p.length - 1][0].toUpperCase()}.` : p[0] }
 const shownCode = (code) => code.slice(0, 4)                 // CODE-4 (owner, 23 Nov 2026): people see and type the first 4 characters
 const daysAgo = (iso) => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
+const whenText = (iso) => { const t = new Date(iso), hm = t.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false }), d = new Date(); d.setHours(0, 0, 0, 0)
+  const days = Math.round((d - new Date(t.getFullYear(), t.getMonth(), t.getDate())) / 86400000)
+  return days === 0 ? `Today ${hm}` : days === 1 ? `Yesterday ${hm}` : `${t.getDate()} ${t.toLocaleString('en-GB', { month: 'short' })} ${hm}` }
 const agoText = (d) => (d < 1 ? 'Today' : d === 1 ? '1 day ago' : `${d} days ago`)
 async function viewWaiting(id) {
-  const [{ data: info }, { data: rows }] = await Promise.all([api('community_info', { community: id }), api('waiting', { community: id })])
+  const [{ data: info }, { data: rows }, { data: outRows }] = await Promise.all([api('community_info', { community: id }), api('waiting', { community: id }), api('codes_out', { community: id })])
   if (!info) return toast('Unknown community.')
-  const list = rows || []
+  const list = rows || [], out = outRows || []
   shell('communities', `<p><a href="#/communities">‹ Communities</a></p><h1>${esc(info.name)} — ${list.length} waiting to join</h1>
     <p class="hint">Normally the community’s admin approves people in the app. Approve here to help a new community get going.</p>
     ${list.length ? `<table><tr><th>Name</th><th>Activity</th><th>Mobile</th><th>Email</th><th>Asked</th></tr>
@@ -298,7 +301,12 @@ async function viewWaiting(id) {
       const mail = r.email && !hiddenEmail(r.email) ? `mailto:${r.email}?subject=${encodeURIComponent(`Your request to join ${info.name} on TrailSafe`)}&body=${encodeURIComponent(ask)}` : ''
       return `<tr class="pair"><td><b>${esc(r.full_name)}</b>${r.moving_from ? `<br><span class="pill new">Moving from ${esc(r.moving_from)}</span>` : ''}${r.note ? `<br><span class="muted">“${esc(r.note)}”</span>` : ''}</td><td>${esc(r.activity || '')}</td><td>${r.mobile ? esc(localMobile(r.mobile)) : '<span class="muted">None (before 1.0.7)</span>'}</td><td>${esc(r.email || '')}</td><td class="${d > 7 ? 'red' : ''}">${agoText(d)}</td></tr>
       <tr><td colspan="5"><div class="row">${r.moving_from ? '' : `<button class="btn small go" data-ap="${i}">Approve and send code</button>`}<button class="btn small" data-in="${i}">Let them in now</button><button class="btn small warn" data-ig="${i}">Ignore</button>${r.mobile || mail ? '<span style="width:14px"></span>' : ''}${r.mobile ? `<a class="btn small" target="_blank" rel="noopener" href="${esc(waLink(r.mobile, ask))}">Ask on WhatsApp</a>` : ''}${mail ? `<a class="btn small" href="${esc(mail)}">Email</a>` : ''}</div></td></tr>` }).join('')}</table>
-    <p class="hint">Oldest first. Someone moving from another community needs no code, so they get Let them in now and Ignore only.</p>` : '<p class="muted" style="margin-top:16px">Nobody is waiting.</p>'}`)
+    <p class="hint">Oldest first. Someone moving from another community needs no code, so they get Let them in now and Ignore only.</p>` : '<p class="muted" style="margin-top:16px">Nobody is waiting.</p>'}
+    ${out.length ? `<h2 style="margin-top:28px">Approved, not joined yet — ${out.length}</h2>
+    <p class="hint">The admin approved them and they have a community join code, but haven’t used it. If the admin can’t get the code to them, let them in here.</p>
+    <table><tr><th>Name</th><th>Mobile</th><th>Email</th><th>Approved by</th></tr>
+    ${out.map((r, i) => `<tr class="pair"><td><b>${esc(r.full_name)}</b></td><td>${r.mobile ? esc(localMobile(r.mobile)) : '<span class="muted">None (before 1.0.7)</span>'}</td><td>${esc(r.email || '')}</td><td>${esc(r.approved_by || 'TrailSafe')}, ${esc(whenText(r.approved_at))}</td></tr>
+      <tr><td colspan="4"><div class="row"><button class="btn small" data-out="${i}">Let them in now</button></div></td></tr>`).join('')}</table>` : ''}`)
   document.querySelectorAll('[data-ap]').forEach((b) => (b.onclick = () => guard(async () => {
     const r = list[b.dataset.ap]
     const { data: code } = await api('approve', { community: id, user: r.user_id })
@@ -310,6 +318,13 @@ async function viewWaiting(id) {
       ? { title: `Let ${who} into ${info.name} now?`, text: `They leave ${r.moving_from} and join ${info.name} straight away, with no community join code, and get a notification: “You’re in ${info.name}”.`, verb: 'Let them in now' }
       : { title: `Let ${who} into ${info.name} now?`, text: 'They join straight away as a member, with no community join code, and get a notification:', verb: 'Let them in now',
           extra: `<div class="note"><b>You’re in ${esc(info.name)}</b><br><span class="muted">TrailSafe approved your request, so no join code is needed. Tap to get started.</span></div>` })
+    if (!ok) return
+    await api('let_in', { community: id, user: r.user_id }); toast(`${who} is now in ${info.name}.`); viewWaiting(id)
+  })))
+  document.querySelectorAll('[data-out]').forEach((b) => (b.onclick = () => guard(async () => {     // wf-38 E
+    const r = out[b.dataset.out], who = shortName(r.full_name)
+    const ok = await confirmBox({ title: `Let ${who} into ${info.name} now?`, text: 'They join straight away as a member, with no community join code, and get a notification:', verb: 'Let them in now',
+      extra: `<div class="note"><b>You’re in ${esc(info.name)}</b><br><span class="muted">TrailSafe approved your request, so no join code is needed. Tap to get started.</span></div><p>The community join code ${r.approved_by ? esc(r.approved_by) + ' gave them' : 'they were given'} stops working.</p>` })
     if (!ok) return
     await api('let_in', { community: id, user: r.user_id }); toast(`${who} is now in ${info.name}.`); viewWaiting(id)
   })))
