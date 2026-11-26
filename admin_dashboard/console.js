@@ -40,14 +40,16 @@ const say = (e) => ({ sign_in: 'Please sign in again.', two_step: 'The authentic
   already_handled: 'Already handled — someone decided on this request first.' }[e.message] || e.message)
 
 // ---------- confirm box (wf-14: every change names who and what, and says it is recorded) ----------
-function confirmBox({ title, text, verb, danger = false, extra = '' }) {
+function confirmBox({ title, text, verb, danger = false, extra = '', reason = false }) {
   return new Promise((ok) => {
     const m = $('#modal')
-    m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><p>${esc(text)}</p>${extra}<p class="muted">This is recorded in the audit trail.</p>
-      <div class="row"><button class="btn ${danger ? 'warn' : 'go'}" id="yes">${esc(verb)}</button><button class="btn" id="no">Cancel</button></div></div>`
+    m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><p>${esc(text)}</p>${extra}${reason ? '<label for="why">Reason (required)</label><textarea id="why" rows="2" maxlength="300" style="width:100%" placeholder="e.g. I know them from parkrun"></textarea>' : ''}<p class="muted">This is recorded in the audit trail.</p>
+      <div class="row"><button class="btn ${danger ? 'warn' : 'go'}" id="yes"${reason ? ' disabled' : ''}>${esc(verb)}</button><button class="btn" id="no">Cancel</button></div></div>`
     m.hidden = false
     const done = (v) => { m.hidden = true; m.innerHTML = ''; ok(v) }
-    $('#yes').onclick = () => done(true); $('#no').onclick = () => done(false)
+    if (reason) { const w = $('#why'); w.oninput = () => { $('#yes').disabled = w.value.trim().length < 3 }; w.focus() }
+    // VOUCH-1 (wf-43 P): with a reason, the answer is the reason text (or false)
+    $('#yes').onclick = () => done(reason ? $('#why').value.trim() : true); $('#no').onclick = () => done(false)
   })
 }
 
@@ -163,7 +165,7 @@ async function refreshCounts() {
     counts = { requests: r.data.filter((x) => x.status === 'new').length, feedback: f.data.filter((x) => x.status === 'new').length, problems: pr.data.filter((x) => x.status === 'new').length }
   } catch { /* the counts are a nicety */ }
 }
-const NAV = [['communities', 'Communities'], ['out-now', 'Out now'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee'], ['touch-id', 'Touch ID']]
+const NAV = [['communities', 'Communities'], ['out-now', 'Out now'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee'], ['costs', 'Costs'], ['touch-id', 'Touch ID']]
 function shell(active, inner) {
   const badge = (k) => (k === 'requests' && counts.requests ? `<span class="count">${counts.requests}</span>` : k === 'feedback' && counts.feedback ? `<span class="count">${counts.feedback}</span>` : k === 'problems' && counts.problems ? `<span class="count">${counts.problems}</span>` : '')
   $('#app').innerHTML = `<div class="layout"><nav><div class="brand">TrailSafe</div><div class="sub">Owner console</div>
@@ -197,6 +199,7 @@ function route() {
     if (p === 'audit') return viewAudit()
     if (p === 'trail-areas') return viewTrailAreas(a)
     if (p === 'coffee') return viewCoffee()
+    if (p === 'costs') return viewCosts()
     if (p === 'touch-id') return viewTouchId()
     return viewCommunities()
   })
@@ -295,14 +298,16 @@ async function viewWaiting(id) {
   if (!info) return toast('Unknown community.')
   const list = rows || [], out = outRows || []
   shell('communities', `<p><a href="#/communities">‹ Communities</a></p><h1>${esc(info.name)} — ${list.length} waiting to join</h1>
-    <p class="hint">Normally the community’s admin approves people in the app. Approve here to help a new community get going.</p>
-    ${list.length ? `<table><tr><th>Name</th><th>Activity</th><th>Mobile</th><th>Email</th><th>Asked</th></tr>
+    <p class="hint">Members vouch in the app${list.some((r) => r.via_vouching && r.needed) ? ` (${list.find((r) => r.needed)?.needed} needed here)` : ''}, and the admin can also let people in. Older apps still use Approve and a community join code.</p>
+    ${list.length ? `<table><tr><th>Name</th><th>Activity</th><th>Mobile</th><th>Email</th><th>Asked</th><th>Vouches</th><th>Concerns</th></tr>
     ${list.map((r, i) => { const d = daysAgo(r.requested_at)
       const ask = `Hi ${shortName(r.full_name).split(' ')[0]}, this is Jansen from TrailSafe, about your request to join ${info.name}. Before we approve you, could you tell us `
       const mail = r.email && !hiddenEmail(r.email) ? `mailto:${r.email}?subject=${encodeURIComponent(`Your request to join ${info.name} on TrailSafe`)}&body=${encodeURIComponent(ask)}` : ''
-      return `<tr class="pair"><td><b>${esc(r.full_name)}</b>${r.moving_from ? `<br><span class="pill new">Moving from ${esc(r.moving_from)}</span>` : ''}${r.note ? `<br><span class="muted">“${esc(r.note)}”</span>` : ''}</td><td>${esc(r.activity || '')}</td><td>${r.mobile ? esc(localMobile(r.mobile)) : '<span class="muted">None (before 1.0.7)</span>'}</td><td>${esc(r.email || '')}</td><td class="${d > 7 ? 'red' : ''}">${agoText(d)}</td></tr>
-      <tr><td colspan="5"><div class="row">${r.moving_from ? '' : `<button class="btn small go" data-ap="${i}">Approve and send code</button>`}<button class="btn small" data-in="${i}">Let them in now</button><button class="btn small warn" data-ig="${i}">Ignore</button>${r.mobile || mail ? '<span style="width:14px"></span>' : ''}${r.mobile ? `<a class="btn small" target="_blank" rel="noopener" href="${esc(waLink(r.mobile, ask))}">Ask on WhatsApp</a>` : ''}${mail ? `<a class="btn small" href="${esc(mail)}">Email</a>` : ''}</div></td></tr>` }).join('')}</table>
-    <p class="hint">Oldest first. Someone moving from another community needs no code, so they get Let them in now and Ignore only.</p>` : '<p class="muted" style="margin-top:16px">Nobody is waiting.</p>'}
+      return `<tr class="pair"><td><b>${esc(r.full_name)}</b>${r.moving_from ? `<br><span class="pill new">Moving from ${esc(r.moving_from)}</span>` : ''}${r.note ? `<br><span class="muted">“${esc(r.note)}”</span>` : ''}</td><td>${esc(r.activity || '')}</td><td>${r.mobile ? esc(localMobile(r.mobile)) + (r.mobile_verified ? ' <span class="ok">✓</span>' : '') : '<span class="muted">None (before 1.0.7)</span>'}</td><td>${esc(r.email || '')}</td><td class="${d > 7 ? 'red' : ''}">${agoText(d)}</td>
+      <td>${r.via_vouching ? `${r.vouches || 0} of ${r.needed ?? '—'}${r.vouchers ? `<br><span class="muted">${esc(r.vouchers)}</span>` : ''}${r.needed ? '' : '<br><span class="muted">Too few members: you or the admin decide</span>'}` : '<span class="muted">Older app</span>'}</td>
+      <td>${(r.concerns || []).map((c) => `<b>${esc(c.by)}:</b> “${esc(c.note)}”`).join('<br>') || '<span class="muted">None</span>'}</td></tr>
+      <tr><td colspan="7"><div class="row">${r.moving_from || r.via_vouching ? '' : `<button class="btn small go" data-ap="${i}">Approve and send code</button>`}<button class="btn small" data-in="${i}">Let them in now</button><button class="btn small warn" data-ig="${i}">Ignore</button>${r.mobile || mail ? '<span style="width:14px"></span>' : ''}${r.mobile ? `<a class="btn small" target="_blank" rel="noopener" href="${esc(waLink(r.mobile, ask))}">Ask on WhatsApp</a>` : ''}${mail ? `<a class="btn small" href="${esc(mail)}">Email</a>` : ''}</div></td></tr>` }).join('')}</table>
+    <p class="hint">Oldest first. A concern never pauses a request: enough vouches still let the person in. Someone moving from another community, or asking from the new app, needs no code, so they get Let them in now and Ignore only.</p>` : '<p class="muted" style="margin-top:16px">Nobody is waiting.</p>'}
     ${out.length ? `<h2 style="margin-top:28px">Approved, not joined yet — ${out.length}</h2>
     <p class="hint">The admin approved them and they have a community join code, but haven’t used it. If the admin can’t get the code to them, let them in here.</p>
     <table><tr><th>Name</th><th>Mobile</th><th>Email</th><th>Approved by</th></tr>
@@ -315,25 +320,79 @@ async function viewWaiting(id) {
   })))
   document.querySelectorAll('[data-in]').forEach((b) => (b.onclick = () => guard(async () => {
     const r = list[b.dataset.in], who = shortName(r.full_name)
-    const ok = await confirmBox(r.moving_from
-      ? { title: `Let ${who} into ${info.name} now?`, text: `They leave ${r.moving_from} and join ${info.name} straight away, with no community join code, and get a notification: “You’re in ${info.name}”.`, verb: 'Let them in now' }
-      : { title: `Let ${who} into ${info.name} now?`, text: 'They join straight away as a member, with no community join code, and get a notification:', verb: 'Let them in now',
+    const why = await confirmBox(r.moving_from
+      ? { title: `Let ${who} into ${info.name} now?`, text: `They leave ${r.moving_from} and join ${info.name} straight away, with no community join code, and get a notification: “You’re in ${info.name}”.`, verb: 'Let them in now', reason: true }
+      : { title: `Let ${who} into ${info.name} now?`, text: 'They join straight away as a member, with no community join code, and get a notification:', verb: 'Let them in now', reason: true,
           extra: `<div class="note"><b>You’re in ${esc(info.name)}</b><br><span class="muted">TrailSafe approved your request, so no join code is needed. Tap to get started.</span></div>` })
-    if (!ok) return
-    await api('let_in', { community: id, user: r.user_id }); toast(`${who} is now in ${info.name}.`); viewWaiting(id)
+    if (!why) return
+    await api('let_in', { community: id, user: r.user_id, reason: why }); toast(`${who} is now in ${info.name}.`); viewWaiting(id)
   })))
   document.querySelectorAll('[data-out]').forEach((b) => (b.onclick = () => guard(async () => {     // wf-38 E
     const r = out[b.dataset.out], who = shortName(r.full_name)
-    const ok = await confirmBox({ title: `Let ${who} into ${info.name} now?`, text: 'They join straight away as a member, with no community join code, and get a notification:', verb: 'Let them in now',
+    const why = await confirmBox({ title: `Let ${who} into ${info.name} now?`, text: 'They join straight away as a member, with no community join code, and get a notification:', verb: 'Let them in now', reason: true,
       extra: `<div class="note"><b>You’re in ${esc(info.name)}</b><br><span class="muted">TrailSafe approved your request, so no join code is needed. Tap to get started.</span></div><p>The community join code ${r.approved_by ? esc(r.approved_by) + ' gave them' : 'they were given'} stops working.</p>` })
-    if (!ok) return
-    await api('let_in', { community: id, user: r.user_id }); toast(`${who} is now in ${info.name}.`); viewWaiting(id)
+    if (!why) return
+    await api('let_in', { community: id, user: r.user_id, reason: why }); toast(`${who} is now in ${info.name}.`); viewWaiting(id)
   })))
   document.querySelectorAll('[data-ig]').forEach((b) => (b.onclick = () => guard(async () => {
     const r = list[b.dataset.ig]
     if (!(await confirmBox({ title: `Ignore ${shortName(r.full_name)}?`, text: 'They can ask again.', verb: 'Ignore', danger: true }))) return
     await api('ignore_request', { community: id, user: r.user_id }); toast('Ignored.'); viewWaiting(id)
   })))
+}
+// ---- wf-44 (COSTS-1): what TrailSafe pays for, so we know how much sponsorship to find ----
+const usd = (n) => (n == null || n === '' ? '' : `$${Number(n).toFixed(2)}`)
+const KINDS = ['Monthly', 'Yearly', 'One-off', 'Top-up'], STATUSES = ['Active', 'Pending', 'Cancel planned', 'Ended']
+const COST_PILL = { Active: 'done', Pending: 'new', 'Cancel planned': '', Ended: '' }
+async function viewCosts() {
+  const { data } = await api('costs')
+  const rows = data.rows || []
+  const tile = (big, lab, line) => `<div class="tile"><div class="big">${esc(big)}</div><div class="lab">${esc(lab)}</div><div class="line">${esc(line)}</div></div>`
+  const soon = (d) => {
+    if (!d) return ''
+    const day = new Date(d + 'T00:00:00'), days = Math.ceil((day - new Date(new Date().toDateString())) / 86400000)
+    const shown = day.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    return days >= 0 && days <= 30 ? `<span class="red">${esc(shown)} · ${days === 0 ? 'today' : `in ${days} day${days === 1 ? '' : 's'}`}</span>` : esc(shown)
+  }
+  shell('costs', `<h1>Costs</h1><p class="hint">What TrailSafe pays for, in US dollars. A sponsor who covers the monthly figure pays for everything we run today.</p>
+    <div class="tiles three">${tile(usd(data.per_month), 'Per month', 'Monthly fees, and yearly fees as a monthly share. Pending included.')}${tile(usd(data.per_month * 12), 'Per year', 'The monthly figure times 12.')}${tile(usd(data.once), 'One-off and top-ups so far', 'Paid once: store fees and balances.')}</div>
+    <p class="row" style="margin:14px 0 6px"><button class="btn go" id="addcost">Add a cost</button></p>
+    <table><tr><th>Item</th><th>Kind</th><th>Amount</th><th>Per month</th><th>Renews or ends</th><th>Status</th><th></th></tr>
+    ${rows.map((c, i) => `<tr${c.status === 'Ended' ? ' class="muted"' : ''}><td><b>${esc(c.item)}</b>${c.provider ? `<br><span class="muted">${esc(c.provider)}</span>` : ''}</td><td>${esc(c.kind)}</td>
+      <td>${c.amount_usd == null ? '<span class="muted">Add the amount</span>' : usd(c.amount_usd)}</td><td>${c.kind === 'Monthly' || c.kind === 'Yearly' ? usd(c.per_month) : '—'}</td>
+      <td>${c.renews_on ? soon(c.renews_on) : c.kind === 'Yearly' ? '<span class="muted">Add the date</span>' : ''}</td><td><span class="pill ${COST_PILL[c.status] || ''}">${esc(c.status)}</span></td>
+      <td><button class="btn small" data-cost="${i}">Edit</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No costs yet.</td></tr>'}</table>
+    <p class="hint">A date within 30 days is red, so you see renewals and cancellations coming.</p>`)
+  document.getElementById('addcost').onclick = () => costBox(null)
+  document.querySelectorAll('[data-cost]').forEach((b) => (b.onclick = () => costBox(rows[b.dataset.cost])))
+}
+function costBox(c) {
+  const m = document.getElementById('modal'), v = (k) => esc(c?.[k] ?? '')
+  const opt = (list, cur) => list.map((x) => `<option${x === cur ? ' selected' : ''}>${esc(x)}</option>`).join('')
+  const el = (id) => document.getElementById(id)
+  m.innerHTML = `<div class="box"><h2>${c ? 'Edit a cost' : 'Add a cost'}</h2>
+    <label for="ci">Item</label><input id="ci" type="text" maxlength="120" value="${v('item')}">
+    <label for="cp">Provider</label><input id="cp" type="text" maxlength="80" value="${v('provider')}">
+    <div class="row" style="gap:12px"><div style="flex:1"><label for="ck">Kind</label><select id="ck">${opt(KINDS, c?.kind ?? 'Monthly')}</select></div>
+      <div style="flex:1"><label for="ca">Amount (USD)</label><input id="ca" type="text" inputmode="decimal" value="${c?.amount_usd ?? ''}"></div></div>
+    <div class="row" style="gap:12px"><div style="flex:1"><label for="cs">Started</label><input id="cs" type="date" value="${v('started_on')}"></div>
+      <div style="flex:1"><label for="cr">Renews or ends</label><input id="cr" type="date" value="${v('renews_on')}"></div></div>
+    <label for="ct">Status</label><select id="ct">${opt(STATUSES, c?.status ?? 'Active')}</select>
+    <label for="cf">What it pays for</label><input id="cf" type="text" maxlength="200" value="${v('pays_for')}">
+    <label for="cn">Notes</label><textarea id="cn" rows="2" maxlength="500">${v('notes')}</textarea>
+    <div class="err" id="ce"></div><p class="muted">This is recorded in the audit trail.</p>
+    <div class="row"><button class="btn go" id="csave">Save</button><button class="btn" id="cno">Cancel</button></div></div>`
+  m.hidden = false
+  const close = () => { m.hidden = true; m.innerHTML = '' }
+  el('cno').onclick = close
+  el('csave').onclick = () => guard(async () => {
+    const item = el('ci').value.trim(), raw = el('ca').value.trim().replace(/[$,\s]/g, '')
+    if (!item) { el('ce').textContent = 'Give the cost a name.'; return }
+    if (raw && !/^\d+(\.\d{1,2})?$/.test(raw)) { el('ce').textContent = 'Type the amount as a number, for example 20 or 1.15.'; return }
+    await api('cost_save', { id: c?.id ?? null, item, provider: el('cp').value.trim(), kind: el('ck').value, amount: raw ? Number(raw) : null,
+      started: el('cs').value || null, renews: el('cr').value || null, status: el('ct').value, pays_for: el('cf').value.trim(), notes: el('cn').value.trim() })
+    close(); toast('Saved.'); viewCosts()
+  })
 }
 // U: the code, with Copy, WhatsApp (WhatsApp Web, the S-85 message; you choose the contact) and Email (to their address). Resolves on Done.
 function codeBox(r, community, code) {
