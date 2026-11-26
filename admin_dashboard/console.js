@@ -165,7 +165,7 @@ async function refreshCounts() {
     counts = { requests: r.data.filter((x) => x.status === 'new').length, feedback: f.data.filter((x) => x.status === 'new').length, problems: pr.data.filter((x) => x.status === 'new').length }
   } catch { /* the counts are a nicety */ }
 }
-const NAV = [['communities', 'Communities'], ['out-now', 'Out now'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee'], ['touch-id', 'Touch ID']]
+const NAV = [['communities', 'Communities'], ['out-now', 'Out now'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee'], ['costs', 'Costs'], ['touch-id', 'Touch ID']]
 function shell(active, inner) {
   const badge = (k) => (k === 'requests' && counts.requests ? `<span class="count">${counts.requests}</span>` : k === 'feedback' && counts.feedback ? `<span class="count">${counts.feedback}</span>` : k === 'problems' && counts.problems ? `<span class="count">${counts.problems}</span>` : '')
   $('#app').innerHTML = `<div class="layout"><nav><div class="brand">TrailSafe</div><div class="sub">Owner console</div>
@@ -199,6 +199,7 @@ function route() {
     if (p === 'audit') return viewAudit()
     if (p === 'trail-areas') return viewTrailAreas(a)
     if (p === 'coffee') return viewCoffee()
+    if (p === 'costs') return viewCosts()
     if (p === 'touch-id') return viewTouchId()
     return viewCommunities()
   })
@@ -338,6 +339,60 @@ async function viewWaiting(id) {
     if (!(await confirmBox({ title: `Ignore ${shortName(r.full_name)}?`, text: 'They can ask again.', verb: 'Ignore', danger: true }))) return
     await api('ignore_request', { community: id, user: r.user_id }); toast('Ignored.'); viewWaiting(id)
   })))
+}
+// ---- wf-44 (COSTS-1): what TrailSafe pays for, so we know how much sponsorship to find ----
+const usd = (n) => (n == null || n === '' ? '' : `$${Number(n).toFixed(2)}`)
+const KINDS = ['Monthly', 'Yearly', 'One-off', 'Top-up'], STATUSES = ['Active', 'Pending', 'Cancel planned', 'Ended']
+const COST_PILL = { Active: 'done', Pending: 'new', 'Cancel planned': '', Ended: '' }
+async function viewCosts() {
+  const { data } = await api('costs')
+  const rows = data.rows || []
+  const tile = (big, lab, line) => `<div class="tile"><div class="big">${esc(big)}</div><div class="lab">${esc(lab)}</div><div class="line">${esc(line)}</div></div>`
+  const soon = (d) => {
+    if (!d) return ''
+    const day = new Date(d + 'T00:00:00'), days = Math.ceil((day - new Date(new Date().toDateString())) / 86400000)
+    const shown = day.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    return days >= 0 && days <= 30 ? `<span class="red">${esc(shown)} · ${days === 0 ? 'today' : `in ${days} day${days === 1 ? '' : 's'}`}</span>` : esc(shown)
+  }
+  shell('costs', `<h1>Costs</h1><p class="hint">What TrailSafe pays for, in US dollars. A sponsor who covers the monthly figure pays for everything we run today.</p>
+    <div class="tiles three">${tile(usd(data.per_month), 'Per month', 'Monthly fees, and yearly fees as a monthly share. Pending included.')}${tile(usd(data.per_month * 12), 'Per year', 'The monthly figure times 12.')}${tile(usd(data.once), 'One-off and top-ups so far', 'Paid once: store fees and balances.')}</div>
+    <p class="row" style="margin:14px 0 6px"><button class="btn go" id="addcost">Add a cost</button></p>
+    <table><tr><th>Item</th><th>Kind</th><th>Amount</th><th>Per month</th><th>Renews or ends</th><th>Status</th><th></th></tr>
+    ${rows.map((c, i) => `<tr${c.status === 'Ended' ? ' class="muted"' : ''}><td><b>${esc(c.item)}</b>${c.provider ? `<br><span class="muted">${esc(c.provider)}</span>` : ''}</td><td>${esc(c.kind)}</td>
+      <td>${c.amount_usd == null ? '<span class="muted">Add the amount</span>' : usd(c.amount_usd)}</td><td>${c.kind === 'Monthly' || c.kind === 'Yearly' ? usd(c.per_month) : '—'}</td>
+      <td>${c.renews_on ? soon(c.renews_on) : c.kind === 'Yearly' ? '<span class="muted">Add the date</span>' : ''}</td><td><span class="pill ${COST_PILL[c.status] || ''}">${esc(c.status)}</span></td>
+      <td><button class="btn small" data-cost="${i}">Edit</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">No costs yet.</td></tr>'}</table>
+    <p class="hint">A date within 30 days is red, so you see renewals and cancellations coming.</p>`)
+  document.getElementById('addcost').onclick = () => costBox(null)
+  document.querySelectorAll('[data-cost]').forEach((b) => (b.onclick = () => costBox(rows[b.dataset.cost])))
+}
+function costBox(c) {
+  const m = document.getElementById('modal'), v = (k) => esc(c?.[k] ?? '')
+  const opt = (list, cur) => list.map((x) => `<option${x === cur ? ' selected' : ''}>${esc(x)}</option>`).join('')
+  const el = (id) => document.getElementById(id)
+  m.innerHTML = `<div class="box"><h2>${c ? 'Edit a cost' : 'Add a cost'}</h2>
+    <label for="ci">Item</label><input id="ci" type="text" maxlength="120" value="${v('item')}">
+    <label for="cp">Provider</label><input id="cp" type="text" maxlength="80" value="${v('provider')}">
+    <div class="row" style="gap:12px"><div style="flex:1"><label for="ck">Kind</label><select id="ck">${opt(KINDS, c?.kind ?? 'Monthly')}</select></div>
+      <div style="flex:1"><label for="ca">Amount (USD)</label><input id="ca" type="text" inputmode="decimal" value="${c?.amount_usd ?? ''}"></div></div>
+    <div class="row" style="gap:12px"><div style="flex:1"><label for="cs">Started</label><input id="cs" type="date" value="${v('started_on')}"></div>
+      <div style="flex:1"><label for="cr">Renews or ends</label><input id="cr" type="date" value="${v('renews_on')}"></div></div>
+    <label for="ct">Status</label><select id="ct">${opt(STATUSES, c?.status ?? 'Active')}</select>
+    <label for="cf">What it pays for</label><input id="cf" type="text" maxlength="200" value="${v('pays_for')}">
+    <label for="cn">Notes</label><textarea id="cn" rows="2" maxlength="500">${v('notes')}</textarea>
+    <div class="err" id="ce"></div><p class="muted">This is recorded in the audit trail.</p>
+    <div class="row"><button class="btn go" id="csave">Save</button><button class="btn" id="cno">Cancel</button></div></div>`
+  m.hidden = false
+  const close = () => { m.hidden = true; m.innerHTML = '' }
+  el('cno').onclick = close
+  el('csave').onclick = () => guard(async () => {
+    const item = el('ci').value.trim(), raw = el('ca').value.trim().replace(/[$,\s]/g, '')
+    if (!item) { el('ce').textContent = 'Give the cost a name.'; return }
+    if (raw && !/^\d+(\.\d{1,2})?$/.test(raw)) { el('ce').textContent = 'Type the amount as a number, for example 20 or 1.15.'; return }
+    await api('cost_save', { id: c?.id ?? null, item, provider: el('cp').value.trim(), kind: el('ck').value, amount: raw ? Number(raw) : null,
+      started: el('cs').value || null, renews: el('cr').value || null, status: el('ct').value, pays_for: el('cf').value.trim(), notes: el('cn').value.trim() })
+    close(); toast('Saved.'); viewCosts()
+  })
 }
 // U: the code, with Copy, WhatsApp (WhatsApp Web, the S-85 message; you choose the contact) and Email (to their address). Resolves on Done.
 function codeBox(r, community, code) {
