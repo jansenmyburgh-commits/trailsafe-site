@@ -165,7 +165,7 @@ async function refreshCounts() {
     counts = { requests: r.data.filter((x) => x.status === 'new').length, feedback: f.data.filter((x) => x.status === 'new').length, problems: pr.data.filter((x) => x.status === 'new').length }
   } catch { /* the counts are a nicety */ }
 }
-const NAV = [['communities', 'Communities'], ['out-now', 'Out now'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee'], ['costs', 'Costs'], ['touch-id', 'Touch ID']]
+const NAV = [['communities', 'Communities'], ['out-now', 'Out now'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee'], ['costs', 'Costs'], ['messages', 'Messages'], ['touch-id', 'Touch ID']]
 function shell(active, inner) {
   const badge = (k) => (k === 'requests' && counts.requests ? `<span class="count">${counts.requests}</span>` : k === 'feedback' && counts.feedback ? `<span class="count">${counts.feedback}</span>` : k === 'problems' && counts.problems ? `<span class="count">${counts.problems}</span>` : '')
   $('#app').innerHTML = `<div class="layout"><nav><div class="brand">TrailSafe</div><div class="sub">Owner console</div>
@@ -200,6 +200,8 @@ function route() {
     if (p === 'trail-areas') return viewTrailAreas(a)
     if (p === 'coffee') return viewCoffee()
     if (p === 'costs') return viewCosts()
+    if (p === 'messages' && a === 'new') return viewWriteMessage()
+    if (p === 'messages') return viewMessages()
     if (p === 'touch-id') return viewTouchId()
     return viewCommunities()
   })
@@ -393,6 +395,98 @@ function costBox(c) {
       started: el('cs').value || null, renews: el('cr').value || null, status: el('ct').value, pays_for: el('cf').value.trim(), notes: el('cn').value.trim() })
     close(); toast('Saved.'); viewCosts()
   })
+}
+// ---- wf-46 G, H (INBOX-1, signed off 27 Nov 2026): messages to members' inbox in the app (the bell on the home map). To all communities, or
+// the ones ticked; an optional button that may only open a WhatsApp link or a trailsafety.app page; an optional notification. Opened and
+// tapped counts are totals only, never who. Sending and taking back are recorded in the audit trail.
+const LINK_OK = /^https:\/\/(chat\.whatsapp\.com|wa\.me|(www\.)?whatsapp\.com|(www\.)?trailsafety\.app)(\/\S*)?$/
+async function viewMessages() {
+  const { data } = await api('messages')
+  shell('messages', `<h1>Messages</h1><p class="hint">Messages to members’ inbox in the app. Members see them under the bell on the home map.</p>
+    <p class="row" style="margin:0 0 10px"><a class="btn go" href="#/messages/new" style="text-decoration:none">Write a message</a></p>
+    <table><tr><th>Sent</th><th>To</th><th>Title</th><th>Button</th><th>Notification</th><th>Opened</th><th></th></tr>
+    ${data.map((m) => `<tr${m.withdrawn_at ? ' class="muted"' : ''}><td>${esc(when(m.created_at))}</td><td>${esc(m.to)} · ${m.recipients}</td>
+      <td><b>${esc(m.title)}</b>${m.withdrawn_at ? '<br><span class="muted">Taken back</span>' : ''}</td><td>${m.button_label ? esc(m.button_label) : '<span class="muted">None</span>'}</td>
+      <td>${m.push ? 'Yes' : 'No'}</td><td>${m.opened} of ${m.recipients}${m.button_label ? ` · ${m.tapped} tapped the button` : ''}</td>
+      <td>${m.withdrawn_at ? '' : `<button class="btn small warn" data-back="${esc(m.id)}">Take back</button>`}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Nothing sent yet.</td></tr>'}</table>
+    <p class="hint">Sending is recorded in the audit trail. A message can be taken back; it then disappears from everyone’s inbox (a notification already delivered stays on the phone).</p>`)
+  document.querySelectorAll('[data-back]').forEach((b) => (b.onclick = () => guard(async () => {
+    if (!(await ask('Take this message back?', 'It disappears from everyone’s inbox.', 'Take back'))) return
+    await api('message_withdraw', { id: b.dataset.back }); toast('Taken back.'); viewMessages()
+  })))
+}
+// A small yes/no box (the page never uses the browser's own confirm()).
+function ask(title, line, yes) {
+  return new Promise((ok) => {
+    const m = document.getElementById('modal')
+    m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><p>${esc(line)}</p><div class="row"><button class="btn go" id="ay">${esc(yes)}</button><button class="btn" id="an">Cancel</button></div></div>`
+    m.hidden = false
+    const done = (v) => { m.hidden = true; m.innerHTML = ''; ok(v) }
+    document.getElementById('ay').onclick = () => done(true); document.getElementById('an').onclick = () => done(false)
+  })
+}
+async function viewWriteMessage() {
+  const { data: comms } = await api('communities')
+  const el = (id) => document.getElementById(id)
+  shell('messages', `<p><a href="#/messages">‹ Messages</a></p><h1>Write a message</h1><p class="hint">Members see it under the bell on the home map.</p>
+    <div class="panel" style="max-width:620px">
+      <label for="mto">To</label><select id="mto"><option value="all">All communities</option><option value="some">Choose communities…</option></select>
+      <div id="mlist" hidden style="border:1.5px solid #d6cdb4;border-radius:8px;padding:8px 12px;margin-top:8px;background:#fff">
+        ${comms.map((c) => `<label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:13px;margin:4px 0"><input type="checkbox" value="${esc(c.community_id)}" style="width:auto"> ${esc(c.name)} <span class="muted">· ${c.members} members</span></label>`).join('')}
+      </div>
+      <p class="hint" style="margin:4px 0 8px" id="mcount"> </p>
+      <label for="mti">Title</label><input id="mti" type="text" maxlength="80">
+      <label for="mbo">Message</label><textarea id="mbo" rows="6" maxlength="2000"></textarea>
+      <label>Button (optional)</label><div class="row" style="gap:12px"><div style="flex:1"><input id="mbl" type="text" maxlength="40" placeholder="Join the WhatsApp group"></div><div style="flex:1.4"><input id="mbu" type="text" placeholder="https://chat.whatsapp.com/…"></div></div>
+      <p class="hint" style="margin:2px 0 8px">Only WhatsApp links and trailsafety.app pages are allowed. WhatsApp buttons tell members the group will see their number.</p>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="mpu" checked style="width:auto"> Also send a notification</label>
+      <div class="err" id="merr"></div>
+      <div class="row" style="margin-top:14px"><button class="btn go" id="msend" disabled>Send</button><button class="btn" id="mprev">Preview on a phone</button></div>
+    </div>`)
+  let n = 0
+  const chosen = () => [...document.querySelectorAll('#mlist input:checked')].map((x) => x.value)
+  const target = () => (el('mto').value === 'all' ? null : chosen())
+  const recount = async () => {
+    const t = target()
+    el('mlist').hidden = el('mto').value === 'all'
+    if (t && t.length === 0) { n = 0; el('mcount').textContent = 'Tick at least one community.'; el('msend').disabled = true; el('msend').textContent = 'Send'; return }
+    const { data } = await api('message_audience', { communities: t })
+    n = data || 0
+    el('mcount').innerHTML = t ? `<b>${t.length} communit${t.length === 1 ? 'y' : 'ies'} · ${n} members.</b>` : `<b>All communities · ${n} members.</b>`
+    el('msend').disabled = n === 0; el('msend').textContent = `Send to ${n} members`
+  }
+  el('mto').onchange = () => guard(recount)
+  document.querySelectorAll('#mlist input').forEach((x) => (x.onchange = () => guard(recount)))
+  const read = () => {
+    const title = el('mti').value.trim(), body = el('mbo').value.trim(), label = el('mbl').value.trim(), url = el('mbu').value.trim()
+    if (!title) return { err: 'Give the message a title.' }
+    if (!body) return { err: 'Write the message.' }
+    if (!!label !== !!url) return { err: 'A button needs both its words and its link, or leave both empty.' }
+    if (url && !LINK_OK.test(url)) return { err: 'The link must start with https:// and be a WhatsApp link or a trailsafety.app page.' }
+    return { title, body, label, url }
+  }
+  el('mprev').onclick = () => {
+    const r = read(); if (r.err) { el('merr').textContent = r.err; return }
+    el('merr').textContent = ''
+    const wa = /whatsapp|wa\.me/.test(r.url)
+    const m = el('modal')
+    m.innerHTML = `<div class="box" style="max-width:360px"><p class="muted" style="margin:0">‹ INBOX</p><h2 style="margin:4px 0">${esc(r.title)}</h2><p class="muted" style="margin:0 0 10px">From TrailSafe · now</p>
+      <p style="white-space:pre-wrap">${esc(r.body)}</p>${r.label ? `<p><button class="btn go" style="width:100%">${esc(r.label)}</button></p>${wa ? '<p class="muted" style="text-align:center">Opens WhatsApp. Other people in a WhatsApp group can see your phone number.</p>' : ''}` : ''}
+      <div class="row"><button class="btn" id="pclose">Close</button></div></div>`
+    m.hidden = false
+    el('pclose').onclick = () => { m.hidden = true; m.innerHTML = '' }
+  }
+  el('msend').onclick = () => guard(async () => {
+    const r = read(); if (r.err) { el('merr').textContent = r.err; return }
+    el('merr').textContent = ''
+    const t = target()
+    const where = t ? `in ${t.length} communit${t.length === 1 ? 'y' : 'ies'}` : 'in all communities'
+    if (!(await ask(`Send to ${n} members ${where}?`, el('mpu').checked ? 'It goes to their inbox, with a notification.' : 'It goes to their inbox, without a notification.', 'Send'))) return
+    el('msend').disabled = true
+    const { data } = await api('message_send', { title: r.title, body: r.body, button_label: r.label || null, button_url: r.url || null, communities: t, push: el('mpu').checked })
+    toast(`Sent to ${data.recipients} members.`); location.hash = '#/messages'
+  })
+  await recount()
 }
 // U: the code, with Copy, WhatsApp (WhatsApp Web, the S-85 message; you choose the contact) and Email (to their address). Resolves on Done.
 function codeBox(r, community, code) {
