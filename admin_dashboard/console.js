@@ -201,6 +201,7 @@ function route() {
     if (p === 'coffee') return viewCoffee()
     if (p === 'costs') return viewCosts()
     if (p === 'messages' && a === 'new') return viewWriteMessage()
+    if (p === 'messages' && a) return viewMessage(a)
     if (p === 'messages') return viewMessages()
     if (p === 'touch-id') return viewTouchId()
     return viewCommunities()
@@ -404,16 +405,49 @@ async function viewMessages() {
   const { data } = await api('messages')
   shell('messages', `<h1>Messages</h1><p class="hint">Messages to members’ inbox in the app. Members see them under the bell on the home map.</p>
     <p class="row" style="margin:0 0 10px"><a class="btn go" href="#/messages/new" style="text-decoration:none">Write a message</a></p>
-    <table><tr><th>Sent</th><th>To</th><th>Title</th><th>Button</th><th>Notification</th><th>Opened</th><th></th></tr>
+    <table><tr><th>Sent</th><th>To</th><th>Title</th><th>Button</th><th>Notification</th><th>Accepted</th><th>Opened</th><th></th></tr>
     ${data.map((m) => `<tr${m.withdrawn_at ? ' class="muted"' : ''}><td>${esc(when(m.created_at))}</td><td>${esc(m.to)} · ${m.recipients}</td>
-      <td><b>${esc(m.title)}</b>${m.withdrawn_at ? '<br><span class="muted">Taken back</span>' : ''}</td><td>${m.button_label ? esc(m.button_label) : '<span class="muted">None</span>'}</td>
-      <td>${m.push ? 'Yes' : 'No'}</td><td>${m.opened} of ${m.recipients}${m.button_label ? ` · ${m.tapped} tapped the button` : ''}</td>
-      <td>${m.withdrawn_at ? '' : `<button class="btn small warn" data-back="${esc(m.id)}">Take back</button>`}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Nothing sent yet.</td></tr>'}</table>
-    <p class="hint">Sending is recorded in the audit trail. A message can be taken back; it then disappears from everyone’s inbox (a notification already delivered stays on the phone).</p>`)
-  document.querySelectorAll('[data-back]').forEach((b) => (b.onclick = () => guard(async () => {
-    if (!(await ask('Take this message back?', 'It disappears from everyone’s inbox.', 'Take back'))) return
-    await api('message_withdraw', { id: b.dataset.back }); toast('Taken back.'); viewMessages()
-  })))
+      <td><a href="#/messages/${esc(m.id)}"><b>${esc(m.title)}</b></a>${m.withdrawn_at ? '<br><span class="muted">Taken back</span>' : ''}</td><td>${m.button_label ? esc(m.button_label) : '<span class="muted">None</span>'}</td>
+      <td>${m.push ? 'Yes' : 'No'}</td><td>${m.push ? `<a href="#/messages/${esc(m.id)}">${m.accepted} of ${m.recipients}</a>` : '<span class="muted">—</span>'}</td><td>${m.opened} of ${m.recipients}${m.button_label ? ` · ${m.tapped} tapped the button` : ''}</td>
+      <td>${m.withdrawn_at ? '' : `<button class="btn small warn" data-back="${esc(m.id)}">Take back</button>`}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Nothing sent yet.</td></tr>'}</table>
+    <p class="hint">Sending is recorded in the audit trail. <b>Accepted</b> is how many people’s phones Google or Apple accepted the notification for; click it, or a title, for the delivery panel. <b>Take back</b> removes the message from everyone’s inbox and changes the notification on their phones to “Message taken back”.</p>`)
+  document.querySelectorAll('[data-back]').forEach((b) => (b.onclick = () => takeBack(data.find((m) => m.id === b.dataset.back), viewMessages)))
+}
+// wf-46 H2, H3: take back, and replace the notification on phones that got it.
+function takeBack(m, then) {
+  return guard(async () => {
+    if (!m) return
+    const line = `“${m.title}” disappears from the inbox of ${m.recipients === 1 ? m.to : `all ${m.recipients} people`}.${m.push ? ' On phones that got the notification, it changes to “Message taken back”.' : ''} Anyone who already read it has read it. This can’t be undone.`
+    if (!(await ask('Take this message back?', line, 'Take back'))) return
+    const { data } = await api('message_withdraw', { id: m.id })
+    toast(m.push ? `Taken back. Notification replaced on ${data?.replaced ?? 0} ${data?.replaced === 1 ? 'person’s phone' : 'people’s phones'}.` : 'Taken back.'); then()
+  })
+}
+// wf-46 H4: one message's delivery panel. Counts only, never who.
+async function viewMessage(id) {
+  const { data: d } = await api('message_detail', { id })
+  if (!d) { shell('messages', '<p><a href="#/messages">‹ Messages</a></p><p class="muted">That message wasn’t found.</p>'); return }
+  const tile = (big, lab, line) => `<div class="tile"><div class="big">${esc(big)}</div><div class="lab">${esc(lab)}</div><div class="line">${esc(line)}</div></div>`
+  const row = (label, n, line = '', sub = 0) => `<tr><td style="padding-left:${sub === 2 ? 44 : sub ? 28 : 12}px">${sub ? '↳ ' : ''}${esc(label)}</td><td style="text-align:right"><b>${n ?? '—'}</b></td><td class="muted">${line}</td></tr>`
+  const meta = [`Sent ${when(d.created_at)}${d.sent_by ? ' by ' + d.sent_by : ''}`, `to ${d.to}`, d.push ? 'with a notification' : 'no notification', d.button_label ? `button: ${d.button_label}` : null].filter(Boolean).join(' · ')
+  shell('messages', `<p><a href="#/messages">‹ Messages</a></p><h1>${esc(d.title)}</h1><p class="hint">${esc(meta)}${d.withdrawn_at ? ` · <b>taken back ${esc(when(d.withdrawn_at))}</b>` : ''}</p>
+    <div class="tiles three" style="grid-template-columns:repeat(4,1fr)">${tile(d.recipients, 'Sent to', 'People it was for.')}${tile(d.push ? d.accepted : '—', 'Accepted', 'Google or Apple took the notification for their phone.')}${tile(d.opened, 'Opened', 'Read it in the inbox.')}${tile(d.button_label ? d.tapped : '—', 'Tapped the button', d.button_label ? 'Opened the link from it.' : 'No button.')}</div>
+    ${d.push ? `<h2 style="margin-top:18px">Delivery</h2><table><tr><th>What happened to the notification</th><th style="text-align:right">People</th><th></th></tr>
+      ${row('Sent to', d.recipients, 'Everyone the message was for. All of them see it in their inbox.')}
+      ${row('No phone that can get notifications', d.no_phone, 'Never allowed notifications, or haven’t opened TrailSafe since installing.', 1)}
+      ${row('Accepted by Google or Apple', d.accepted, `Android ${d.android} · iPhone ${d.iphone}. Delivered when the phone is on and has signal (kept up to 2 days).`, 1)}
+      ${row('of these, notifications turned off on the phone', d.off, 'Accepted, but the phone won’t show it. Known from app 1.0.11 on.', 2)}
+      ${row('App no longer installed', d.removed, 'Google or Apple said so; we stop sending to that phone.', 1)}
+      ${row('Failed', d.failed, d.failed_reason ? 'Error: ' + esc(d.failed_reason) : '', 1)}
+      ${row('Waiting to send', d.waiting, '', 1)}</table>` : '<p class="hint">Sent without a notification: it is only in the inbox.</p>'}
+    <h2 style="margin-top:18px">What people did</h2><table><tr><th></th><th style="text-align:right">People</th><th></th></tr>
+      ${d.push ? row('Tapped the notification', d.push_tapped, 'Known from app 1.0.11 on.') : ''}
+      ${row('Opened it in the inbox', d.opened, d.push ? 'Includes those who tapped the notification.' : '')}
+      ${d.button_label ? row('Tapped the button', d.tapped) : ''}</table>
+    <p class="hint">Counts only, never who. A person with two phones counts once.</p>
+    ${d.withdrawn_at ? '' : '<p class="row" style="margin-top:10px"><button class="btn warn" id="mback">Take back</button></p>'}`)
+  const b = document.getElementById('mback')
+  if (b) b.onclick = () => takeBack(d, () => viewMessage(id))
 }
 // A small yes/no box (the page never uses the browser's own confirm()).
 function ask(title, line, yes) {
