@@ -165,7 +165,7 @@ async function refreshCounts() {
     counts = { requests: r.data.filter((x) => x.status === 'new').length, feedback: f.data.filter((x) => x.status === 'new').length, problems: pr.data.filter((x) => x.status === 'new').length }
   } catch { /* the counts are a nicety */ }
 }
-const NAV = [['communities', 'Communities'], ['out-now', 'Out now'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee'], ['costs', 'Costs'], ['touch-id', 'Touch ID']]
+const NAV = [['communities', 'Communities'], ['out-now', 'Out now'], ['people', 'People'], ['alerts', 'Alert log'], ['health', 'Health'], ['requests', 'Group requests'], ['feedback', 'Feedback'], ['problems', 'Problems'], ['audit', 'Audit trail'], ['trail-areas', 'Trail areas'], ['coffee', 'Coffee'], ['costs', 'Costs'], ['messages', 'Messages'], ['touch-id', 'Touch ID']]
 function shell(active, inner) {
   const badge = (k) => (k === 'requests' && counts.requests ? `<span class="count">${counts.requests}</span>` : k === 'feedback' && counts.feedback ? `<span class="count">${counts.feedback}</span>` : k === 'problems' && counts.problems ? `<span class="count">${counts.problems}</span>` : '')
   $('#app').innerHTML = `<div class="layout"><nav><div class="brand">TrailSafe</div><div class="sub">Owner console</div>
@@ -200,6 +200,9 @@ function route() {
     if (p === 'trail-areas') return viewTrailAreas(a)
     if (p === 'coffee') return viewCoffee()
     if (p === 'costs') return viewCosts()
+    if (p === 'messages' && a === 'new') return viewWriteMessage()
+    if (p === 'messages' && a) return viewMessage(a)
+    if (p === 'messages') return viewMessages()
     if (p === 'touch-id') return viewTouchId()
     return viewCommunities()
   })
@@ -393,6 +396,153 @@ function costBox(c) {
       started: el('cs').value || null, renews: el('cr').value || null, status: el('ct').value, pays_for: el('cf').value.trim(), notes: el('cn').value.trim() })
     close(); toast('Saved.'); viewCosts()
   })
+}
+// ---- wf-46 G, H (INBOX-1, signed off 27 Nov 2026): messages to members' inbox in the app (the bell on the home map). To all communities, or
+// the ones ticked; an optional button that may only open a WhatsApp link or a trailsafety.app page; an optional notification. Opened and
+// tapped counts are totals only, never who. Sending and taking back are recorded in the audit trail.
+const LINK_OK = /^https:\/\/(chat\.whatsapp\.com|wa\.me|(www\.)?whatsapp\.com|(www\.)?trailsafety\.app)(\/\S*)?$/
+async function viewMessages() {
+  const { data } = await api('messages')
+  shell('messages', `<h1>Messages</h1><p class="hint">Messages to members’ inbox in the app. Members see them under the bell on the home map.</p>
+    <p class="row" style="margin:0 0 10px"><a class="btn go" href="#/messages/new" style="text-decoration:none">Write a message</a></p>
+    <table><tr><th>Sent</th><th>To</th><th>Title</th><th>Button</th><th>Notification</th><th>Accepted</th><th>Opened</th><th></th></tr>
+    ${data.map((m) => `<tr${m.withdrawn_at ? ' class="muted"' : ''}><td>${esc(when(m.created_at))}</td><td>${esc(m.to)} · ${m.recipients}</td>
+      <td><a href="#/messages/${esc(m.id)}"><b>${esc(m.title)}</b></a>${m.withdrawn_at ? '<br><span class="muted">Taken back</span>' : ''}</td><td>${m.button_label ? esc(m.button_label) : '<span class="muted">None</span>'}</td>
+      <td>${m.push ? 'Yes' : 'No'}</td><td>${m.push ? `<a href="#/messages/${esc(m.id)}">${m.accepted} of ${m.recipients}</a>` : '<span class="muted">—</span>'}</td><td>${m.opened} of ${m.recipients}${m.button_label ? ` · ${m.tapped} tapped the button` : ''}</td>
+      <td>${m.withdrawn_at ? '' : `<button class="btn small warn" data-back="${esc(m.id)}">Take back</button>`}</td></tr>`).join('') || '<tr><td colspan="8" class="muted">Nothing sent yet.</td></tr>'}</table>
+    <p class="hint">Sending is recorded in the audit trail. <b>Accepted</b> is how many people’s phones Google or Apple accepted the notification for; click it, or a title, for the delivery panel. <b>Take back</b> removes the message from everyone’s inbox and changes the notification on their phones to “Message taken back”.</p>`)
+  document.querySelectorAll('[data-back]').forEach((b) => (b.onclick = () => takeBack(data.find((m) => m.id === b.dataset.back), viewMessages)))
+}
+// wf-46 H2, H3: take back, and replace the notification on phones that got it.
+function takeBack(m, then) {
+  return guard(async () => {
+    if (!m) return
+    const line = `“${m.title}” disappears from the inbox of ${m.recipients === 1 ? m.to : `all ${m.recipients} people`}.${m.push ? ' On phones that got the notification, it changes to “Message taken back”.' : ''} Anyone who already read it has read it. This can’t be undone.`
+    if (!(await ask('Take this message back?', line, 'Take back'))) return
+    const { data } = await api('message_withdraw', { id: m.id })
+    toast(m.push ? `Taken back. Notification replaced on ${data?.replaced ?? 0} ${data?.replaced === 1 ? 'person’s phone' : 'people’s phones'}.` : 'Taken back.'); then()
+  })
+}
+// wf-46 H4: one message's delivery panel. Counts only, never who.
+async function viewMessage(id) {
+  const { data: d } = await api('message_detail', { id })
+  if (!d) { shell('messages', '<p><a href="#/messages">‹ Messages</a></p><p class="muted">That message wasn’t found.</p>'); return }
+  const tile = (big, lab, line) => `<div class="tile"><div class="big">${esc(big)}</div><div class="lab">${esc(lab)}</div><div class="line">${esc(line)}</div></div>`
+  const row = (label, n, line = '', sub = 0) => `<tr><td style="padding-left:${sub === 2 ? 44 : sub ? 28 : 12}px">${sub ? '↳ ' : ''}${esc(label)}</td><td style="text-align:right"><b>${n ?? '—'}</b></td><td class="muted">${line}</td></tr>`
+  const meta = [`Sent ${when(d.created_at)}${d.sent_by ? ' by ' + d.sent_by : ''}`, `to ${d.to}`, d.push ? 'with a notification' : 'no notification', d.button_label ? `button: ${d.button_label}` : null].filter(Boolean).join(' · ')
+  shell('messages', `<p><a href="#/messages">‹ Messages</a></p><h1>${esc(d.title)}</h1><p class="hint">${esc(meta)}${d.withdrawn_at ? ` · <b>taken back ${esc(when(d.withdrawn_at))}</b>` : ''}</p>
+    <div class="tiles three" style="grid-template-columns:repeat(4,1fr)">${tile(d.recipients, 'Sent to', 'People it was for.')}${tile(d.push ? d.accepted : '—', 'Accepted', 'Google or Apple took the notification for their phone.')}${tile(d.opened, 'Opened', 'Read it in the inbox.')}${tile(d.button_label ? d.tapped : '—', 'Tapped the button', d.button_label ? 'Opened the link from it.' : 'No button.')}</div>
+    ${d.push ? `<h2 style="margin-top:18px">Delivery</h2><table><tr><th>What happened to the notification</th><th style="text-align:right">People</th><th></th></tr>
+      ${row('Sent to', d.recipients, 'Everyone the message was for. All of them see it in their inbox.')}
+      ${row('No phone that can get notifications', d.no_phone, 'Never allowed notifications, or haven’t opened TrailSafe since installing.', 1)}
+      ${row('Accepted by Google or Apple', d.accepted, `Android ${d.android} · iPhone ${d.iphone}. Delivered when the phone is on and has signal (kept up to 2 days).`, 1)}
+      ${row('of these, notifications turned off on the phone', d.off, 'Accepted, but the phone won’t show it. Known from app 1.0.11 on.', 2)}
+      ${row('App no longer installed', d.removed, 'Google or Apple said so; we stop sending to that phone.', 1)}
+      ${row('Failed', d.failed, d.failed_reason ? 'Error: ' + esc(d.failed_reason) : '', 1)}
+      ${row('Waiting to send', d.waiting, '', 1)}</table>` : '<p class="hint">Sent without a notification: it is only in the inbox.</p>'}
+    <h2 style="margin-top:18px">What people did</h2><table><tr><th></th><th style="text-align:right">People</th><th></th></tr>
+      ${d.push ? row('Tapped the notification', d.push_tapped, 'Known from app 1.0.11 on.') : ''}
+      ${row('Opened it in the inbox', d.opened, d.push ? 'Includes those who tapped the notification.' : '')}
+      ${d.button_label ? row('Tapped the button', d.tapped) : ''}</table>
+    <p class="hint">Counts only, never who. A person with two phones counts once.</p>
+    ${d.withdrawn_at ? '' : '<p class="row" style="margin-top:10px"><button class="btn warn" id="mback">Take back</button></p>'}`)
+  const b = document.getElementById('mback')
+  if (b) b.onclick = () => takeBack(d, () => viewMessage(id))
+}
+// A small yes/no box (the page never uses the browser's own confirm()).
+function ask(title, line, yes) {
+  return new Promise((ok) => {
+    const m = document.getElementById('modal')
+    m.innerHTML = `<div class="box"><h2>${esc(title)}</h2><p>${esc(line)}</p><div class="row"><button class="btn go" id="ay">${esc(yes)}</button><button class="btn" id="an">Cancel</button></div></div>`
+    m.hidden = false
+    const done = (v) => { m.hidden = true; m.innerHTML = ''; ok(v) }
+    document.getElementById('ay').onclick = () => done(true); document.getElementById('an').onclick = () => done(false)
+  })
+}
+async function viewWriteMessage() {
+  const { data: comms } = await api('communities')
+  const el = (id) => document.getElementById(id)
+  shell('messages', `<p><a href="#/messages">‹ Messages</a></p><h1>Write a message</h1><p class="hint">Members see it under the bell on the home map.</p>
+    <div class="panel" style="max-width:620px">
+      <label for="mto">To</label><select id="mto"><option value="all">All communities</option><option value="communities">Choose communities…</option><option value="admins">All community admins</option><option value="person">One person…</option></select>
+      <div id="mperson" hidden><input id="mq" type="text" placeholder="Search by name or email" style="margin-top:8px"><div id="mres" style="border:1.5px solid #d6cdb4;border-radius:8px;background:#fff;margin-top:4px;font-size:13px" hidden></div></div>
+      <div id="mlist" hidden style="border:1.5px solid #d6cdb4;border-radius:8px;padding:8px 12px;margin-top:8px;background:#fff">
+        ${comms.map((c) => `<label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:13px;margin:4px 0"><input type="checkbox" value="${esc(c.community_id)}" style="width:auto"> ${esc(c.name)} <span class="muted">· ${c.members} members</span></label>`).join('')}
+      </div>
+      <p class="hint" style="margin:4px 0 8px" id="mcount"> </p>
+      <label for="mti">Title</label><input id="mti" type="text" maxlength="80">
+      <label for="mbo">Message</label><textarea id="mbo" rows="6" maxlength="2000"></textarea>
+      <label>Button (optional)</label><div class="row" style="gap:12px"><div style="flex:1"><input id="mbl" type="text" maxlength="40" placeholder="Join the WhatsApp group"></div><div style="flex:1.4"><input id="mbu" type="text" placeholder="https://chat.whatsapp.com/…"></div></div>
+      <p class="hint" style="margin:2px 0 8px">Only WhatsApp links and trailsafety.app pages are allowed. WhatsApp buttons tell members the group will see their number.</p>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="mpu" checked style="width:auto"> Also send a notification</label>
+      <div class="err" id="merr"></div>
+      <div class="row" style="margin-top:14px"><button class="btn go" id="msend" disabled>Send</button><button class="btn" id="mprev">Preview on a phone</button></div>
+    </div>`)
+  let n = 0, person = null   // wf-46 G2: { user_id, full_name }
+  const kind = () => el('mto').value
+  const chosen = () => [...document.querySelectorAll('#mlist input:checked')].map((x) => x.value)
+  const who = () => ({ target: kind(), communities: kind() === 'communities' ? chosen() : null, user: kind() === 'person' ? person?.user_id ?? null : null })
+  const people = (k) => `${k} ${k === 1 ? 'person' : 'people'}`
+  const recount = async () => {
+    const k = kind(), w = who()
+    el('mlist').hidden = k !== 'communities'; el('mperson').hidden = k !== 'person'
+    const off = (line) => { n = 0; el('mcount').innerHTML = line; el('msend').disabled = true; el('msend').textContent = 'Send' }
+    if (k === 'communities' && w.communities.length === 0) return off('Tick at least one community.')
+    if (k === 'person' && !person) return off('Search for the person by name or email, then pick them.')
+    const { data } = await api('message_audience', w)
+    n = data || 0
+    el('mcount').innerHTML = k === 'all' ? `<b>All communities · ${n} members.</b>`
+      : k === 'communities' ? `<b>${w.communities.length} communit${w.communities.length === 1 ? 'y' : 'ies'} · ${n} members.</b>`
+      : k === 'admins' ? `<b>All community admins · ${people(n)}.</b> Every admin of every community.`
+      : `<b>To ${esc(person.full_name)} only.</b> Use this to see how a message looks on your own phone or Daisy’s before sending it to everyone.`
+    el('msend').disabled = n === 0
+    el('msend').textContent = k === 'person' ? `Send to ${person.full_name}` : `Send to ${people(n)}`
+  }
+  el('mto').onchange = () => guard(recount)
+  let qt = null
+  el('mq').oninput = () => { clearTimeout(qt); person = null; void recount(); qt = setTimeout(() => guard(async () => {
+    const q = el('mq').value.trim()
+    if (q.length < 2) { el('mres').hidden = true; return }
+    const { data } = await api('search_people', { query: q })
+    const by = new Map()
+    for (const r of data || []) { const x = by.get(r.user_id) || { user_id: r.user_id, full_name: r.full_name, email: r.email, where: [] }; if (r.community) x.where.push(r.community + (r.role === 'admin' ? ' (admin)' : r.status !== 'approved' ? ` (${r.status})` : '')); by.set(r.user_id, x) }
+    const list = [...by.values()].slice(0, 8)
+    el('mres').hidden = false
+    el('mres').innerHTML = list.map((r, i) => `<div data-pick="${i}" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee"><b>${esc(r.full_name)}</b> <span class="muted">· ${esc(r.email)}${r.where.length ? ' · ' + esc(r.where.join(', ')) : ''}</span></div>`).join('') || '<div style="padding:8px 12px" class="muted">Nobody found.</div>'
+    document.querySelectorAll('[data-pick]').forEach((d) => (d.onclick = () => { person = list[d.dataset.pick]; el('mq').value = person.full_name; el('mres').hidden = true; guard(recount) }))
+  }), 300) }
+  document.querySelectorAll('#mlist input').forEach((x) => (x.onchange = () => guard(recount)))
+  const read = () => {
+    const title = el('mti').value.trim(), body = el('mbo').value.trim(), label = el('mbl').value.trim(), url = el('mbu').value.trim()
+    if (!title) return { err: 'Give the message a title.' }
+    if (!body) return { err: 'Write the message.' }
+    if (!!label !== !!url) return { err: 'A button needs both its words and its link, or leave both empty.' }
+    if (url && !LINK_OK.test(url)) return { err: 'The link must start with https:// and be a WhatsApp link or a trailsafety.app page.' }
+    return { title, body, label, url }
+  }
+  el('mprev').onclick = () => {
+    const r = read(); if (r.err) { el('merr').textContent = r.err; return }
+    el('merr').textContent = ''
+    const wa = /whatsapp|wa\.me/.test(r.url)
+    const m = el('modal')
+    m.innerHTML = `<div class="box" style="max-width:360px"><p class="muted" style="margin:0">‹ INBOX</p><h2 style="margin:4px 0">${esc(r.title)}</h2><p class="muted" style="margin:0 0 10px">From TrailSafe · now</p>
+      <p style="white-space:pre-wrap">${esc(r.body)}</p>${r.label ? `<p><button class="btn go" style="width:100%">${esc(r.label)}</button></p>${wa ? '<p class="muted" style="text-align:center">Opens WhatsApp. Other people in a WhatsApp group can see your phone number.</p>' : ''}` : ''}
+      <div class="row"><button class="btn" id="pclose">Close</button></div></div>`
+    m.hidden = false
+    el('pclose').onclick = () => { m.hidden = true; m.innerHTML = '' }
+  }
+  el('msend').onclick = () => guard(async () => {
+    const r = read(); if (r.err) { el('merr').textContent = r.err; return }
+    el('merr').textContent = ''
+    const w = who(), k = w.target
+    const q = k === 'person' ? `Send to ${person.full_name}?` : k === 'admins' ? `Send to all ${people(n)} who are community admins?`
+      : k === 'communities' ? `Send to ${n} members in ${w.communities.length} communit${w.communities.length === 1 ? 'y' : 'ies'}?` : `Send to ${n} members in all communities?`
+    if (!(await ask(q, el('mpu').checked ? 'It goes to their inbox, with a notification.' : 'It goes to their inbox, without a notification.', 'Send'))) return
+    el('msend').disabled = true
+    const { data } = await api('message_send', { ...w, title: r.title, body: r.body, button_label: r.label || null, button_url: r.url || null, push: el('mpu').checked })
+    toast(k === 'person' ? `Sent to ${person.full_name}.` : `Sent to ${people(data.recipients)}.`); location.hash = '#/messages'
+  })
+  await recount()
 }
 // U: the code, with Copy, WhatsApp (WhatsApp Web, the S-85 message; you choose the contact) and Email (to their address). Resolves on Done.
 function codeBox(r, community, code) {
