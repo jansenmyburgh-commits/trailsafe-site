@@ -430,7 +430,8 @@ async function viewWriteMessage() {
   const el = (id) => document.getElementById(id)
   shell('messages', `<p><a href="#/messages">‹ Messages</a></p><h1>Write a message</h1><p class="hint">Members see it under the bell on the home map.</p>
     <div class="panel" style="max-width:620px">
-      <label for="mto">To</label><select id="mto"><option value="all">All communities</option><option value="some">Choose communities…</option></select>
+      <label for="mto">To</label><select id="mto"><option value="all">All communities</option><option value="communities">Choose communities…</option><option value="admins">All community admins</option><option value="person">One person…</option></select>
+      <div id="mperson" hidden><input id="mq" type="text" placeholder="Search by name or email" style="margin-top:8px"><div id="mres" style="border:1.5px solid #d6cdb4;border-radius:8px;background:#fff;margin-top:4px;font-size:13px" hidden></div></div>
       <div id="mlist" hidden style="border:1.5px solid #d6cdb4;border-radius:8px;padding:8px 12px;margin-top:8px;background:#fff">
         ${comms.map((c) => `<label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0;font-size:13px;margin:4px 0"><input type="checkbox" value="${esc(c.community_id)}" style="width:auto"> ${esc(c.name)} <span class="muted">· ${c.members} members</span></label>`).join('')}
       </div>
@@ -443,19 +444,39 @@ async function viewWriteMessage() {
       <div class="err" id="merr"></div>
       <div class="row" style="margin-top:14px"><button class="btn go" id="msend" disabled>Send</button><button class="btn" id="mprev">Preview on a phone</button></div>
     </div>`)
-  let n = 0
+  let n = 0, person = null   // wf-46 G2: { user_id, full_name }
+  const kind = () => el('mto').value
   const chosen = () => [...document.querySelectorAll('#mlist input:checked')].map((x) => x.value)
-  const target = () => (el('mto').value === 'all' ? null : chosen())
+  const who = () => ({ target: kind(), communities: kind() === 'communities' ? chosen() : null, user: kind() === 'person' ? person?.user_id ?? null : null })
+  const people = (k) => `${k} ${k === 1 ? 'person' : 'people'}`
   const recount = async () => {
-    const t = target()
-    el('mlist').hidden = el('mto').value === 'all'
-    if (t && t.length === 0) { n = 0; el('mcount').textContent = 'Tick at least one community.'; el('msend').disabled = true; el('msend').textContent = 'Send'; return }
-    const { data } = await api('message_audience', { communities: t })
+    const k = kind(), w = who()
+    el('mlist').hidden = k !== 'communities'; el('mperson').hidden = k !== 'person'
+    const off = (line) => { n = 0; el('mcount').innerHTML = line; el('msend').disabled = true; el('msend').textContent = 'Send' }
+    if (k === 'communities' && w.communities.length === 0) return off('Tick at least one community.')
+    if (k === 'person' && !person) return off('Search for the person by name or email, then pick them.')
+    const { data } = await api('message_audience', w)
     n = data || 0
-    el('mcount').innerHTML = t ? `<b>${t.length} communit${t.length === 1 ? 'y' : 'ies'} · ${n} members.</b>` : `<b>All communities · ${n} members.</b>`
-    el('msend').disabled = n === 0; el('msend').textContent = `Send to ${n} members`
+    el('mcount').innerHTML = k === 'all' ? `<b>All communities · ${n} members.</b>`
+      : k === 'communities' ? `<b>${w.communities.length} communit${w.communities.length === 1 ? 'y' : 'ies'} · ${n} members.</b>`
+      : k === 'admins' ? `<b>All community admins · ${people(n)}.</b> Every admin of every community.`
+      : `<b>To ${esc(person.full_name)} only.</b> Use this to see how a message looks on your own phone or Daisy’s before sending it to everyone.`
+    el('msend').disabled = n === 0
+    el('msend').textContent = k === 'person' ? `Send to ${person.full_name}` : `Send to ${people(n)}`
   }
   el('mto').onchange = () => guard(recount)
+  let qt = null
+  el('mq').oninput = () => { clearTimeout(qt); person = null; void recount(); qt = setTimeout(() => guard(async () => {
+    const q = el('mq').value.trim()
+    if (q.length < 2) { el('mres').hidden = true; return }
+    const { data } = await api('search_people', { query: q })
+    const by = new Map()
+    for (const r of data || []) { const x = by.get(r.user_id) || { user_id: r.user_id, full_name: r.full_name, email: r.email, where: [] }; if (r.community) x.where.push(r.community + (r.role === 'admin' ? ' (admin)' : r.status !== 'approved' ? ` (${r.status})` : '')); by.set(r.user_id, x) }
+    const list = [...by.values()].slice(0, 8)
+    el('mres').hidden = false
+    el('mres').innerHTML = list.map((r, i) => `<div data-pick="${i}" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee"><b>${esc(r.full_name)}</b> <span class="muted">· ${esc(r.email)}${r.where.length ? ' · ' + esc(r.where.join(', ')) : ''}</span></div>`).join('') || '<div style="padding:8px 12px" class="muted">Nobody found.</div>'
+    document.querySelectorAll('[data-pick]').forEach((d) => (d.onclick = () => { person = list[d.dataset.pick]; el('mq').value = person.full_name; el('mres').hidden = true; guard(recount) }))
+  }), 300) }
   document.querySelectorAll('#mlist input').forEach((x) => (x.onchange = () => guard(recount)))
   const read = () => {
     const title = el('mti').value.trim(), body = el('mbo').value.trim(), label = el('mbl').value.trim(), url = el('mbu').value.trim()
@@ -479,12 +500,13 @@ async function viewWriteMessage() {
   el('msend').onclick = () => guard(async () => {
     const r = read(); if (r.err) { el('merr').textContent = r.err; return }
     el('merr').textContent = ''
-    const t = target()
-    const where = t ? `in ${t.length} communit${t.length === 1 ? 'y' : 'ies'}` : 'in all communities'
-    if (!(await ask(`Send to ${n} members ${where}?`, el('mpu').checked ? 'It goes to their inbox, with a notification.' : 'It goes to their inbox, without a notification.', 'Send'))) return
+    const w = who(), k = w.target
+    const q = k === 'person' ? `Send to ${person.full_name}?` : k === 'admins' ? `Send to all ${people(n)} who are community admins?`
+      : k === 'communities' ? `Send to ${n} members in ${w.communities.length} communit${w.communities.length === 1 ? 'y' : 'ies'}?` : `Send to ${n} members in all communities?`
+    if (!(await ask(q, el('mpu').checked ? 'It goes to their inbox, with a notification.' : 'It goes to their inbox, without a notification.', 'Send'))) return
     el('msend').disabled = true
-    const { data } = await api('message_send', { title: r.title, body: r.body, button_label: r.label || null, button_url: r.url || null, communities: t, push: el('mpu').checked })
-    toast(`Sent to ${data.recipients} members.`); location.hash = '#/messages'
+    const { data } = await api('message_send', { ...w, title: r.title, body: r.body, button_label: r.label || null, button_url: r.url || null, push: el('mpu').checked })
+    toast(k === 'person' ? `Sent to ${person.full_name}.` : `Sent to ${people(data.recipients)}.`); location.hash = '#/messages'
   })
   await recount()
 }
